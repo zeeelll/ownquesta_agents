@@ -1,0 +1,15 @@
+[project]
+name = "ownquesta-agent-api"
+version = "0.0.1"
+description = "Demo FastAPI agent API (Hello endpoint)"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+]
+
+[tool.uvicorn]
+app = "main:app"
+host = "127.0.0.1"
+port = 8000
+reload = true
