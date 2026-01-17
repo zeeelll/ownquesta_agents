@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from ml_validation_agent.endpoint import router as ml_validation_router
 
 app = FastAPI()
 
@@ -26,3 +27,5 @@ def meta():
         "status": "ok",
         "endpoints": ["/hello", "/meta.json"],
     }
+
+app.include_router(ml_validation_router, prefix="/ml-validation", tags=["ML Validation Agent"])
