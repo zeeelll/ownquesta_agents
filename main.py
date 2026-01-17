@@ -15,3 +15,14 @@ app.add_middleware(
 @app.get("/hello")
 def hello():
     return {"message": "Hello!"}
+
+
+@app.get("/meta.json")
+def meta():
+    # Lightweight service metadata used by the frontend for a quick health probe.
+    return {
+        "name": "ownquesta-agent-api",
+        "version": "0.0.1",
+        "status": "ok",
+        "endpoints": ["/hello", "/meta.json"],
+    }
