@@ -1,0 +1,142 @@
+[
+  {
+    "id": "ownquesta_001",
+    "title": "What is OwnQuesta?",
+    "content": "OwnQuesta is an AI-powered end-to-end machine learning platform designed to help users transform raw datasets into deployable machine learning solutions. It focuses on automation, explainability, and ease of use, enabling both beginners and experienced practitioners to build reliable models with confidence.",
+    "category": "organization_overview",
+    "tags": ["ownquesta", "overview", "platform", "ai"]
+  },
+  {
+    "id": "ownquesta_002",
+    "title": "Why OwnQuesta Exists",
+    "content": "OwnQuesta was created to reduce the complexity of building machine learning systems. Many users struggle with data understanding, feature engineering, model selection, and deployment. OwnQuesta bridges this gap by providing guided, explainable, and automated workflows.",
+    "category": "organization_mission",
+    "tags": ["mission", "problem-solving", "ml-complexity"]
+  },
+  {
+    "id": "ownquesta_003",
+    "title": "Core Vision of OwnQuesta",
+    "content": "The vision of OwnQuesta is to democratize machine learning by making advanced AI workflows transparent, understandable, and accessible to everyone, regardless of their technical background.",
+    "category": "organization_vision",
+    "tags": ["vision", "democratization", "ai"]
+  },
+  {
+    "id": "ownquesta_004",
+    "title": "Who OwnQuesta is Built For",
+    "content": "OwnQuesta is built for students, data scientists, machine learning engineers, startups, and businesses who want to build, understand, and deploy machine learning models without dealing with unnecessary technical overhead.",
+    "category": "target_audience",
+    "tags": ["users", "audience", "students", "business"]
+  },
+  {
+    "id": "ownquesta_005",
+    "title": "OwnQuesta Philosophy",
+    "content": "OwnQuesta follows the philosophy that machine learning should be explainable, trustworthy, and user-centric. Every automated decision is designed to be transparent rather than a black box.",
+    "category": "organization_philosophy",
+    "tags": ["philosophy", "explainable-ai", "trust"]
+  },
+  {
+    "id": "ownquesta_006",
+    "title": "How OwnQuesta is Different from Traditional Tools",
+    "content": "Unlike traditional machine learning tools that require extensive manual configuration, OwnQuesta emphasizes guided automation combined with human-understandable explanations, reducing errors and improving learning.",
+    "category": "organization_differentiation",
+    "tags": ["difference", "automl", "explainability"]
+  },
+  {
+    "id": "ownquesta_007",
+    "title": "Core Problem OwnQuesta Solves",
+    "content": "OwnQuesta solves the problem of fragmented machine learning workflows by unifying data understanding, modeling, and deployment into a single cohesive platform.",
+    "category": "organization_problem",
+    "tags": ["problem", "workflow", "ml"]
+  },
+  {
+    "id": "ownquesta_008",
+    "title": "Approach to Automation",
+    "content": "Automation in OwnQuesta is designed to assist users rather than replace decision-making. The platform explains why certain choices are made, enabling users to learn and intervene when needed.",
+    "category": "organization_principles",
+    "tags": ["automation", "human-in-the-loop"]
+  },
+  {
+    "id": "ownquesta_009",
+    "title": "Explainability Focus",
+    "content": "Explainability is a foundational principle of OwnQuesta. The platform ensures that users understand data transformations, feature creation, and model behavior.",
+    "category": "organization_principles",
+    "tags": ["explainability", "transparency"]
+  },
+  {
+    "id": "ownquesta_010",
+    "title": "Educational Value of OwnQuesta",
+    "content": "OwnQuesta is not only a production tool but also an educational platform that helps users learn machine learning concepts through guided and explainable workflows.",
+    "category": "organization_value",
+    "tags": ["education", "learning", "ml"]
+  },
+  {
+    "id": "ownquesta_011",
+    "title": "OwnQuesta for Beginners",
+    "content": "For beginners, OwnQuesta lowers the entry barrier to machine learning by providing structured guidance, explanations, and minimal configuration requirements.",
+    "category": "organization_value",
+    "tags": ["beginners", "accessibility"]
+  },
+  {
+    "id": "ownquesta_012",
+    "title": "OwnQuesta for Experts",
+    "content": "For experienced practitioners, OwnQuesta accelerates experimentation by automating repetitive tasks while preserving control and interpretability.",
+    "category": "organization_value",
+    "tags": ["experts", "productivity"]
+  },
+  {
+    "id": "ownquesta_013",
+    "title": "End-to-End Philosophy",
+    "content": "OwnQuesta follows an end-to-end philosophy, meaning the entire machine learning lifecycle is considered from data ingestion to deployment readiness.",
+    "category": "organization_principles",
+    "tags": ["end-to-end", "ml-lifecycle"]
+  },
+  {
+    "id": "ownquesta_014",
+    "title": "Trust and Reliability",
+    "content": "Trust is central to OwnQuesta. The platform prioritizes reliable results, explainable decisions, and reproducible workflows.",
+    "category": "organization_values",
+    "tags": ["trust", "reliability"]
+  },
+  {
+    "id": "ownquesta_015",
+    "title": "Scalability Mindset",
+    "content": "OwnQuesta is designed with scalability in mind, allowing users to start small and grow their machine learning capabilities as their needs evolve.",
+    "category": "organization_values",
+    "tags": ["scalability", "growth"]
+  },
+  {
+    "id": "ownquesta_016",
+    "title": "OwnQuesta as a Platform",
+    "content": "OwnQuesta is not just a tool but a platform that connects data understanding, intelligent automation, and deployment-oriented thinking.",
+    "category": "organization_overview",
+    "tags": ["platform", "ecosystem"]
+  },
+  {
+    "id": "ownquesta_017",
+    "title": "User-Centric Design",
+    "content": "Every aspect of OwnQuesta is designed around user clarity, ensuring users understand what the system is doing at each stage.",
+    "category": "organization_design",
+    "tags": ["user-centric", "design"]
+  },
+  {
+    "id": "ownquesta_018",
+    "title": "Long-Term Goal of OwnQuesta",
+    "content": "The long-term goal of OwnQuesta is to become a trusted AI companion for building, understanding, and deploying machine learning systems responsibly.",
+    "category": "organization_vision",
+    "tags": ["future", "ai-companion"]
+  },
+  {
+    "id": "ownquesta_019",
+    "title": "Ethical AI Perspective",
+    "content": "OwnQuesta promotes responsible and ethical AI by emphasizing transparency, user awareness, and informed decision-making.",
+    "category": "organization_values",
+    "tags": ["ethical-ai", "responsibility"]
+  },
+  {
+    "id": "ownquesta_020",
+    "title": "What OwnQuesta is Not",
+    "content": "OwnQuesta is not a black-box system. It does not hide critical decisions or prevent users from understanding how results are produced.",
+    "category": "organization_clarity",
+    "tags": ["clarity", "non-black-box"]
+  }
+]
