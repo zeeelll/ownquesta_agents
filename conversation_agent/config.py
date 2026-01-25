@@ -2,11 +2,20 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from project root
+project_root = Path(__file__).parent.parent
+env_path = project_root / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Validate API key is set
+if not OPENAI_API_KEY:
+    raise ValueError(
+        "OPENAI_API_KEY is not set. Please ensure the .env file exists in the project root "
+        f"({project_root}) with OPENAI_API_KEY=your-key-here, or set the environment variable."
+    )
 
 # Embedding Configuration
 EMBEDDING_MODEL = "text-embedding-3-small"
