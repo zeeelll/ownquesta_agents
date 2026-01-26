@@ -27,5 +27,5 @@ KNOWLEDGE_BASE_PATH = Path(__file__).parent.parent / "data" / "ownquesta_kb.json
 
 # RAG Configuration
 TOP_K_RESULTS = 3  # Number of relevant documents to retrieve
-TEMPERATURE = 0.7  # Model temperature for responses
+TEMPERATURE = 0.3 # Model temperature for responses
 MAX_TOKENS = 500  # Maximum tokens in response
