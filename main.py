@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from ml_validation_agent.endpoint import router as ml_validation_router
 from conversation_agent.endpoint import router as conversation_router
+from eda_agent.endpoint import router as eda_router
 
 app = FastAPI(
     title="OwnQuesta Agent API",
@@ -36,3 +37,4 @@ def meta():
 # Include routers
 app.include_router(ml_validation_router, prefix="/ml-validation", tags=["ML Validation Agent"])
 app.include_router(conversation_router, prefix="/conversation", tags=["OwnQuesta Conversation Agent"])
+app.include_router(eda_router, prefix="/eda", tags=["EDA Agent"])

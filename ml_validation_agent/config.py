@@ -5,12 +5,14 @@ load_dotenv()
 
 class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    MAX_FILE_SIZE_MB: int = 100
-    MIN_ROWS_FOR_ML: int = 50
-    MAX_MISSING_PERCENT: float = 50.0
+    
+    # No limits
+    MAX_FILE_SIZE_MB = None
+    MIN_ROWS_FOR_ML = None
+    MAX_MISSING_PERCENT = None
     
     @property
     def has_openai_key(self) -> bool:
-        return bool(self.OPENAI_API_KEY and self.OPENAI_API_KEY.startswith("sk-"))
+        return bool(self.OPENAI_API_KEY)
 
 settings = Settings()

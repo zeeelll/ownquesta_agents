@@ -2,6 +2,8 @@ from typing import List, Dict, Any, Tuple
 import re
 from openai import OpenAI
 from .config import OPENAI_API_KEY, CHAT_MODEL, TEMPERATURE, MAX_TOKENS
+import logging
+logger = logging.getLogger(__name__)
 from .vector_store import get_vector_store
 from .models import ConversationMessage
 
@@ -10,7 +12,16 @@ class RAGService:
     """RAG-based conversation service for OwnQuesta"""
     
     def __init__(self):
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Create client only if API key exists; else warn and set client to None
+        if OPENAI_API_KEY:
+            try:
+                self.client = OpenAI(api_key=OPENAI_API_KEY)
+            except Exception as e:
+                logger.warning("Failed to initialize OpenAI client: %s", e)
+                self.client = None
+        else:
+            logger.warning("OPENAI_API_KEY not set; RAGService will be disabled until configured.")
+            self.client = None
         self.vector_store = get_vector_store()
         # In-memory conversation state keyed by user_id
         self.user_histories: Dict[str, List[ConversationMessage]] = {}
@@ -157,6 +168,11 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
         messages.append({"role": "user", "content": user_prompt})
 
         temperature = 0.9 if (self.is_greeting(user_message) or self.is_farewell(user_message)) else TEMPERATURE
+
+        if not self.client:
+            raise RuntimeError(
+                "OpenAI client not configured. Set OPENAI_API_KEY in environment or .env to enable chat functionality."
+            )
 
         response = self.client.chat.completions.create(
             model=CHAT_MODEL,

@@ -10,12 +10,21 @@ load_dotenv(dotenv_path=env_path)
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Validate API key is set
+# Validate API key is set; only warn at import time to avoid hard failures during testing
 if not OPENAI_API_KEY:
-    raise ValueError(
-        "OPENAI_API_KEY is not set. Please ensure the .env file exists in the project root "
-        f"({project_root}) with OPENAI_API_KEY=your-key-here, or set the environment variable."
-    )
+    try:
+        # Prefer logging if available in host app
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "OPENAI_API_KEY is not set. Set it in %s or via environment variable for full functionality.",
+            env_path,
+        )
+    except Exception:
+        # Fallback to a simple print if logging isn't configured yet
+        print(
+            f"Warning: OPENAI_API_KEY is not set. Set it in {env_path} or via environment variable for full functionality."
+        )
 
 # Embedding Configuration
 EMBEDDING_MODEL = "text-embedding-3-small"
