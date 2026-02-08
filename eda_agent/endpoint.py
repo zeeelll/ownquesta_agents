@@ -6,17 +6,24 @@ import shutil
 import os
 
 from .config import (
+    dataset_overview,
     dataset_shape,
+    column_analysis,
     column_names,
     dataset_info,
+    comprehensive_statistics,
     summary_statistics,
     statistical_measures,
+    advanced_distribution_analysis,
     distribution_analysis,
+    advanced_correlation_analysis,
+    correlation_matrix,
+    data_quality_analysis,
+    outlier_detection,
     unique_values,
     handle_missing_values,
     drop_duplicates,
     data_distribution,
-    correlation_matrix,
 )
 
 router = APIRouter()
@@ -49,17 +56,24 @@ async def upload_and_run(file: UploadFile = File(...)):
 
     # Run local tools and collect JSON-friendly outputs
     tools = [
+        dataset_overview,
         dataset_shape,
+        column_analysis,
         column_names,
         dataset_info,
+        comprehensive_statistics,
         summary_statistics,
         statistical_measures,
+        advanced_distribution_analysis,
         distribution_analysis,
+        advanced_correlation_analysis,
+        correlation_matrix,
+        data_quality_analysis,
+        outlier_detection,
         unique_values,
         handle_missing_values,
         drop_duplicates,
         data_distribution,
-        correlation_matrix,
     ]
     results = {}
     for fn in tools:
