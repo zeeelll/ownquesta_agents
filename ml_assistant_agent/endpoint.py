@@ -4,9 +4,9 @@ import shutil
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from .eda import summarize_df
-from .validate import simple_validate
+from .validate import simple_validate, advanced_validate
 from .docs_gen import generate_docs
 from . import config
 from openai import OpenAI
@@ -213,10 +213,31 @@ def do_eda(filename: str = Form(...)):
 
 
 class ValidationResponse(BaseModel):
-    filename: str
-    target_column: str
-    result: Dict[str, Any]
-    processing_time: float
+    task_type: Optional[str] = None
+    learning_type: Optional[str] = None
+    confidence: Optional[float] = None
+    reasoning: Optional[str] = None
+    algorithm_recommendations: Optional[List[Dict[str, Any]]] = None
+    goal_analysis: Optional[Dict[str, Any]] = None
+    data_summary: Optional[Dict[str, Any]] = None
+    preprocessing: Optional[Dict[str, Any]] = None
+    result: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    # Legacy fields for backward compatibility
+    filename: Optional[str] = None
+    target_column: Optional[str] = None
+    processing_time: Optional[float] = None
+
+
+class GoalAnalysisResponse(BaseModel):
+    goal_analysis: Dict[str, Any]
+    message: str
+    recommendations: Dict[str, Any]
+
+
+class AdvancedValidationRequest(BaseModel):
+    goal: str = Field(..., min_length=10, max_length=1000, description="User's ML objective (e.g. 'predict customer churn')")
+    target_column: Optional[str] = Field(None, description="Target column name (optional, will auto-detect if not provided)")
 
 
 @app.post("/validate", response_model=ValidationResponse)

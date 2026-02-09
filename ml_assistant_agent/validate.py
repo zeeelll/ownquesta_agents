@@ -11,7 +11,10 @@ from sklearn.metrics import (
     mean_absolute_error, explained_variance_score, roc_auc_score
 )
 from sklearn.impute import SimpleImputer
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.ensemble import IsolationForest
 from . import config
+from .goal_detector import detect_ml_task, goal_detector
 import logging
 import warnings
 with warnings.catch_warnings():
@@ -20,9 +23,321 @@ with warnings.catch_warnings():
 logger = logging.getLogger(__name__)
 
 
+def advanced_validate(file_path: str, goal: str, target_column: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Perform advanced ML validation with automatic goal detection and model recommendations
+    
+    Args:
+        file_path: Path to the CSV file
+        goal: User's ML objective description
+        target_column: Name of the target column (optional, will be auto-detected if not provided)
+        
+    Returns:
+        Dictionary containing detailed validation results with goal-based recommendations
+    """
+    try:
+        logger.info(f"Starting advanced validation for {file_path}")
+        logger.info(f"User goal: '{goal[:200]}...'")
+        
+        # Load data
+        df = pd.read_csv(file_path)
+        logger.info(f"Dataset loaded: {df.shape} shape")
+        
+        # Perform goal and dataset analysis
+        goal_analysis = detect_ml_task(goal, df, target_column)
+        
+        # Extract recommendations
+        recommendations = goal_analysis['recommendations']
+        final_task = recommendations['final_task_type']
+        requires_target = recommendations['requires_target_column']
+        
+        logger.info(f"Detected task type: {final_task}")
+        
+        # Handle target column based on task type
+        if requires_target:
+            if target_column is None:
+                # Try to auto-detect target column
+                target_column = _auto_detect_target_column(df, final_task)
+                if target_column is None:
+                    return {
+                        "error": "Supervised learning task detected but no target column specified. Please provide target_column parameter.",
+                        "goal_analysis": goal_analysis,
+                        "available_columns": list(df.columns)
+                    }
+            
+            if target_column not in df.columns:
+                return {
+                    "error": f"Target column '{target_column}' not found. Available columns: {list(df.columns)}",
+                    "goal_analysis": goal_analysis
+                }
+        
+        # Build comprehensive result starting with goal analysis
+        result = {
+            "goal_analysis": goal_analysis,
+            "detected_task_type": final_task,
+            "learning_type": recommendations['learning_type'],
+            "confidence": recommendations['confidence'],
+            "reasoning": recommendations['reasoning'],
+            "algorithm_recommendations": recommendations['algorithms']
+        }
+        
+        # Perform task-specific validation
+        if final_task in ['classification', 'regression']:
+            result.update(_perform_supervised_validation(df, target_column, final_task))
+        elif final_task == 'clustering':
+            result.update(_perform_clustering_validation(df))
+        elif final_task == 'anomaly_detection':
+            result.update(_perform_anomaly_validation(df))
+        else:
+            result.update(_perform_general_validation(df))
+        
+        logger.info(f"Advanced validation completed for {file_path}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Advanced validation failed: {str(e)}"
+        logger.error(error_msg)
+        return {"error": error_msg}
+
+
+def _auto_detect_target_column(df: pd.DataFrame, task_type: str) -> Optional[str]:
+    """
+    Attempt to automatically detect the target column based on dataset characteristics
+    
+    Args:
+        df: Input dataframe
+        task_type: Detected ML task type
+        
+    Returns:
+        Name of likely target column or None if not found
+    """
+    # Common target column names
+    target_keywords = {
+        'classification': ['target', 'class', 'label', 'category', 'outcome', 'result', 
+                         'prediction', 'churn', 'fraud', 'spam', 'diagnosis'],
+        'regression': ['target', 'value', 'price', 'cost', 'amount', 'score', 'rating',
+                      'revenue', 'sales', 'salary', 'income', 'prediction']
+    }
+    
+    keywords = target_keywords.get(task_type, target_keywords['classification'])
+    
+    # Check for exact matches first
+    for col in df.columns:
+        if col.lower() in keywords:
+            logger.info(f"Auto-detected target column: {col} (exact match)")
+            return col
+    
+    # Check for partial matches
+    for col in df.columns:
+        col_lower = col.lower()
+        for keyword in keywords:
+            if keyword in col_lower or col_lower in keyword:
+                logger.info(f"Auto-detected target column: {col} (partial match: {keyword})")
+                return col
+    
+    # Check for numeric columns that might be targets (for regression)
+    if task_type == 'regression':
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) == 1:
+            logger.info(f"Auto-detected target column: {numeric_cols[0]} (only numeric column)")
+            return numeric_cols[0]
+    
+    # Check for binary columns (for classification)
+    if task_type == 'classification':
+        for col in df.columns:
+            if df[col].nunique() == 2:
+                logger.info(f"Auto-detected target column: {col} (binary column)")
+                return col
+    
+    logger.warning("Could not auto-detect target column")
+    return None
+
+
+def _perform_supervised_validation(df: pd.DataFrame, target_column: str, task_type: str) -> Dict[str, Any]:
+    """
+    Perform validation for supervised learning tasks (classification/regression)
+    
+    Args:
+        df: Input dataframe
+        target_column: Target column name
+        task_type: 'classification' or 'regression'
+        
+    Returns:
+        Validation results dictionary
+    """
+    # Clean data and separate features/target
+    df_clean = df.dropna(subset=[target_column]).copy()
+    
+    if len(df_clean) < config.MIN_SAMPLES_FOR_VALIDATION:
+        error_msg = f"Insufficient data: {len(df_clean)} samples (minimum: {config.MIN_SAMPLES_FOR_VALIDATION})"
+        return {"error": error_msg}
+    
+    X = df_clean.drop(columns=[target_column])
+    y = df_clean[target_column]
+    
+    # Preprocess features
+    X_processed, preprocessing_info = advanced_preprocessing(X)
+    
+    if X_processed.shape[1] < config.MIN_FEATURES_FOR_VALIDATION:
+        error_msg = f"Insufficient features after preprocessing: {X_processed.shape[1]}"
+        return {"error": error_msg}
+    
+    # Task-specific validation
+    if task_type == 'classification':
+        unique_targets = y.nunique(dropna=True)
+        validation_results = perform_classification(X_processed, y, unique_targets)
+    else:  # regression
+        validation_results = perform_regression(X_processed, y)
+    
+    # Add data summary
+    validation_results.update({
+        "data_summary": {
+            "original_shape": df.shape,
+            "clean_shape": df_clean.shape,
+            "target_column": target_column,
+            "target_missing_count": df[target_column].isnull().sum(),
+            "features_original": len(X.columns),
+            "features_processed": X_processed.shape[1]
+        },
+        "preprocessing": preprocessing_info
+    })
+    
+    return validation_results
+
+
+def _perform_clustering_validation(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Perform validation for clustering tasks
+    
+    Args:
+        df: Input dataframe
+        
+    Returns:
+        Clustering validation results
+    """
+    # Preprocess data for clustering
+    X_processed, preprocessing_info = advanced_preprocessing(df)
+    
+    if X_processed.shape[1] < 2:
+        return {"error": "Insufficient features for clustering (minimum: 2)"}
+    
+    results = {
+        "task_type": "clustering",
+        "data_summary": {
+            "shape": df.shape,
+            "features_processed": X_processed.shape[1]
+        },
+        "preprocessing": preprocessing_info,
+        "clustering_analysis": {}
+    }
+    
+    # Perform K-means clustering with different k values
+    try:
+        from sklearn.cluster import KMeans
+        from sklearn.metrics import silhouette_score
+        
+        k_values = range(2, min(11, len(X_processed) // 2))
+        clustering_scores = {}
+        
+        for k in k_values:
+            kmeans = KMeans(n_clusters=k, random_state=config.DEFAULT_RANDOM_STATE)
+            cluster_labels = kmeans.fit_predict(X_processed)
+            silhouette_avg = silhouette_score(X_processed, cluster_labels)
+            clustering_scores[k] = {
+                'silhouette_score': float(silhouette_avg),
+                'inertia': float(kmeans.inertia_)
+            }
+        
+        # Find optimal k
+        best_k = max(clustering_scores.keys(), key=lambda k: clustering_scores[k]['silhouette_score'])
+        
+        results["clustering_analysis"] = {
+            "k_means_results": clustering_scores,
+            "recommended_clusters": int(best_k),
+            "best_silhouette_score": clustering_scores[best_k]['silhouette_score']
+        }
+        
+    except Exception as e:
+        logger.error(f"Clustering analysis failed: {e}")
+        results["clustering_analysis"]["error"] = str(e)
+    
+    return results
+
+
+def _perform_anomaly_validation(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Perform validation for anomaly detection tasks
+    
+    Args:
+        df: Input dataframe
+        
+    Returns:
+        Anomaly detection validation results
+    """
+    # Preprocess data
+    X_processed, preprocessing_info = advanced_preprocessing(df)
+    
+    results = {
+        "task_type": "anomaly_detection",
+        "data_summary": {
+            "shape": df.shape,
+            "features_processed": X_processed.shape[1]
+        },
+        "preprocessing": preprocessing_info,
+        "anomaly_analysis": {}
+    }
+    
+    try:
+        from sklearn.ensemble import IsolationForest
+        
+        # Fit Isolation Forest
+        iso_forest = IsolationForest(contamination=0.1, random_state=config.DEFAULT_RANDOM_STATE)
+        outlier_labels = iso_forest.fit_predict(X_processed)
+        
+        n_outliers = np.sum(outlier_labels == -1)
+        outlier_percentage = (n_outliers / len(X_processed)) * 100
+        
+        results["anomaly_analysis"] = {
+            "method": "Isolation Forest",
+            "total_samples": len(X_processed),
+            "detected_outliers": int(n_outliers),
+            "outlier_percentage": float(outlier_percentage),
+            "contamination_rate": 0.1
+        }
+        
+    except Exception as e:
+        logger.error(f"Anomaly detection analysis failed: {e}")
+        results["anomaly_analysis"]["error"] = str(e)
+    
+    return results
+
+
+def _perform_general_validation(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Perform general dataset validation when task type is unclear
+    
+    Args:
+        df: Input dataframe
+        
+    Returns:
+        General validation results
+    """
+    X_processed, preprocessing_info = advanced_preprocessing(df)
+    
+    return {
+        "task_type": "general_analysis",
+        "data_summary": {
+            "shape": df.shape,
+            "features_processed": X_processed.shape[1]
+        },
+        "preprocessing": preprocessing_info,
+        "note": "General dataset analysis performed. Please provide more specific goals for targeted ML recommendations."
+    }
+
+
 def simple_validate(file_path: str, target_column: str) -> Dict[str, Any]:
     """
-    Perform comprehensive ML validation with advanced preprocessing and multiple models
+    Legacy function - redirects to advanced_validate with generic goal
     
     Args:
         file_path: Path to the CSV file
@@ -31,6 +346,8 @@ def simple_validate(file_path: str, target_column: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing detailed validation results
     """
+    generic_goal = f"Analyze the dataset and build a model to predict {target_column}"
+    return advanced_validate(file_path, generic_goal, target_column)
     try:
         logger.info(f"Starting advanced validation for {file_path} with target: {target_column}")
         

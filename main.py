@@ -132,10 +132,18 @@ def get_available_agents():
     
     if ml_assistant_router:
         agents.append({
-            "name": "ML Assistant",
+            "name": "ML Assistant", 
             "prefix": "/ml-assistant",
-            "description": "Comprehensive ML workflow assistance with EDA, validation, and AI chat",
-            "endpoints": ["/upload", "/eda", "/validate", "/chat", "/docs", "/health", "/files"]
+            "description": "Advanced ML workflow assistance with goal-based task detection, EDA, validation, and AI chat",
+            "features": [
+                "Automatic ML task detection (classification, regression, clustering, anomaly detection)",
+                "Goal-based model recommendations", 
+                "Advanced dataset validation",
+                "Comprehensive EDA with statistical analysis",
+                "AI-powered chat assistance",
+                "Code documentation generation"
+            ],
+            "endpoints": ["/upload", "/eda", "/validate", "/advanced-validate", "/goal-analyze", "/chat", "/docs", "/health", "/files"]
         })
     
     if ml_validation_router:

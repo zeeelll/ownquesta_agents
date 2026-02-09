@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from .eda import summarize_df
-from .validate import simple_validate
+from .validate import simple_validate, advanced_validate
 from .docs_gen import generate_docs
 from . import config
 from .endpoint import (
@@ -143,6 +143,89 @@ def do_eda(filename: str = Form(...)):
     except Exception as e:
         logger.error(f"EDA failed for {filename}: {e}")
         raise HTTPException(status_code=500, detail=f"EDA failed: {str(e)}")
+
+
+@router.post("/advanced-validate", response_model=ValidationResponse)
+async def advanced_validation(file: UploadFile = File(...), goal: str = Form(...), target_column: str = Form(None)):
+    """
+    Advanced ML validation with automatic goal detection and model recommendations
+    
+    Args:
+        file: Dataset file to upload and validate
+        goal: User's ML objective description (e.g., "predict customer churn", "segment customers", "detect fraud")
+        target_column: Target column name (optional, will be auto-detected if not provided)
+    """
+    try:
+        # Validate file
+        validate_file_extension(file.filename)
+        validate_file_size(file)
+        
+        # Save uploaded file
+        file_path = get_file_path(file.filename)
+        content = await file.read()
+        
+        with file_path.open("wb") as f:
+            f.write(content)
+        
+        logger.info(f"Advanced validation started for {file.filename} with goal: '{goal[:100]}...'")
+        
+        # Perform advanced validation with goal detection
+        result = advanced_validate(str(file_path), goal, target_column)
+        
+        if "error" in result:
+            logger.error(f"Advanced validation failed: {result['error']}")
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Add metadata
+        result["metadata"] = {
+            "filename": file.filename,
+            "file_size_mb": len(content) / (1024 * 1024),
+            "goal": goal,
+            "target_column": target_column,
+            "timestamp": time.time()
+        }
+        
+        logger.info(f"Advanced validation completed for {file.filename}")
+        return ValidationResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Advanced validation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Advanced validation failed: {str(e)}")
+
+
+@router.post("/goal-analyze")
+async def analyze_goal(goal: str = Form(...)):
+    """
+    Analyze user goal to detect ML task type without requiring dataset upload
+    
+    Args:
+        goal: User's ML objective description
+    """
+    try:
+        from .goal_detector import goal_detector
+        
+        goal_analysis = goal_detector.analyze_goal(goal)
+        
+        return {
+            "goal_analysis": goal_analysis,
+            "message": f"Detected task type: {goal_analysis['primary_task']} with {goal_analysis['confidence']:.1%} confidence",
+            "recommendations": {
+                "task_type": goal_analysis['primary_task'],
+                "learning_type": "supervised" if goal_analysis['is_supervised'] else "unsupervised",
+                "requires_target": goal_analysis['requires_target'],
+                "next_steps": [
+                    "Upload your dataset using /upload or /advanced-validate",
+                    f"Ensure you have a target column if doing {goal_analysis['primary_task']}",
+                    "Consider the suggested algorithms based on your data characteristics"
+                ]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Goal analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Goal analysis failed: {str(e)}")
 
 
 @router.post("/validate", response_model=ValidationResponse)
