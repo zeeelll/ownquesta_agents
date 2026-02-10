@@ -58,8 +58,8 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
 
 # Agent registry and controlled loading
 AGENT_REGISTRY = {
-    
     "conversation": {"module": "conversation_agent.endpoint", "attr": "router", "prefix": "/conversation", "name": "Conversation Agent"},
+    "validation": {"module": "validation_endpoint", "attr": "router", "prefix": "/validation", "name": "Validation Agent"},
 }
 
 # Read ENABLED_AGENTS from environment (comma-separated keys from AGENT_REGISTRY)
@@ -82,6 +82,7 @@ for key, meta in AGENT_REGISTRY.items():
 
 # Expose variables used elsewhere for backwards compatibility
 conversation_router = agent_routers.get("conversation")
+validation_router = agent_routers.get("validation")
 
 # Create main FastAPI application
 app = FastAPI(
@@ -126,6 +127,7 @@ def health():
     
     # Check other agents
     agent_status["conversation"] = "available" if conversation_router else "unavailable"
+    agent_status["validation"] = "available" if validation_router else "unavailable"
     
     overall_status = "ok" if any(status == "available" for status in agent_status.values()) else "degraded"
 
@@ -148,6 +150,12 @@ def get_available_agents() -> List[Dict[str, Any]]:
             "name": "Conversation Agent",
             "prefix": "/conversation",
             "description": "AI-powered conversational assistant with RAG capabilities"
+        })
+    if validation_router:
+        agents.append({
+            "name": "Validation Agent",
+            "prefix": "/validation",
+            "description": "Dataset validation and EDA agent for ML workflows"
         })
     
     
@@ -184,10 +192,21 @@ if conversation_router is not None:
         logger.info("Conversation Agent registered at /conversation")
     except Exception as e:
         logger.exception("Failed to register Conversation router: %s", e)
+if validation_router is not None:
+    try:
+        app.include_router(
+            validation_router,
+            prefix="/validation",
+            tags=["Validation Agent"],
+        )
+        logger.info("Validation Agent registered at /validation")
+    except Exception as e:
+        logger.exception("Failed to register Validation router: %s", e)
 
 # Log startup summary
 total_agents = sum([ 
     conversation_router is not None,
+    validation_router is not None,
 ])
 
 # Add startup event

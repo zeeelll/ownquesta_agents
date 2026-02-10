@@ -28,7 +28,7 @@ if not OPENAI_API_KEY:
 
 # Embedding Configuration
 EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "gpt-4o-mini"
+CHAT_MODEL = "gpt-5-mini"
 
 # Vector Store Configuration
 VECTOR_STORE_PATH = Path(__file__).parent.parent / "data" / "vector_store"
