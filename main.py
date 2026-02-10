@@ -171,6 +171,20 @@ def meta():
         "agents": get_available_agents()
     }
 
+
+# Include routers for available agents (safe registration)
+logger.info("Registering available agent routers...")
+if conversation_router is not None:
+    try:
+        app.include_router(
+            conversation_router,
+            prefix="/conversation",
+            tags=["Conversation Agent"],
+        )
+        logger.info("Conversation Agent registered at /conversation")
+    except Exception as e:
+        logger.exception("Failed to register Conversation router: %s", e)
+
 # Log startup summary
 total_agents = sum([ 
     conversation_router is not None,
