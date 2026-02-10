@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 import numpy as np
 from openai import OpenAI
+import logging
 from .config import (
     OPENAI_API_KEY,
     EMBEDDING_MODEL,
@@ -12,23 +13,41 @@ from .config import (
     TOP_K_RESULTS
 )
 
+logger = logging.getLogger(__name__)
+
 
 class VectorStore:
     """Vector store for OwnQuesta knowledge base using OpenAI embeddings"""
     
     def __init__(self):
-        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize OpenAI client only when API key is provided
+        if OPENAI_API_KEY:
+            try:
+                self.client = OpenAI(api_key=OPENAI_API_KEY)
+            except Exception as e:
+                logger.warning("Failed to initialize OpenAI client: %s", e)
+                self.client = None
+        else:
+            logger.warning("OPENAI_API_KEY not set; vector creation disabled until configured.")
+            self.client = None
+
         self.documents: List[Dict[str, Any]] = []
-        self.embeddings: np.ndarray = None
+        self.embeddings: np.ndarray | None = None
         self.vector_store_path = Path(VECTOR_STORE_PATH)
         self.vector_store_path.mkdir(parents=True, exist_ok=True)
         
-        # Try to load existing vector store, otherwise create new one
+        # Try to load existing vector store; if none and OpenAI client available, create one
         if not self.load_vector_store():
-            self.create_vector_store()
+            if self.client:
+                self.create_vector_store()
+            else:
+                logger.info("No existing vector store found and no OpenAI client available. Skipping creation.")
     
     def create_embeddings(self, texts: List[str]) -> np.ndarray:
         """Create embeddings for a list of texts using OpenAI API"""
+        if not self.client:
+            raise RuntimeError("OpenAI client not configured. Set OPENAI_API_KEY to enable embeddings generation.")
+
         embeddings = []
         for text in texts:
             response = self.client.embeddings.create(
@@ -45,7 +64,7 @@ class VectorStore:
     
     def create_vector_store(self):
         """Create vector store from knowledge base"""
-        print("Creating new vector store from knowledge base...")
+        logger.info("Creating new vector store from knowledge base...")
         
         # Load knowledge base
         self.documents = self.load_knowledge_base()
@@ -62,7 +81,7 @@ class VectorStore:
         
         # Save vector store
         self.save_vector_store()
-        print(f"Vector store created with {len(self.documents)} documents")
+        logger.info("Vector store created with %d documents", len(self.documents))
     
     def save_vector_store(self):
         """Save vector store to disk"""
@@ -82,10 +101,10 @@ class VectorStore:
                     data = pickle.load(f)
                     self.documents = data['documents']
                     self.embeddings = data['embeddings']
-                print(f"Vector store loaded with {len(self.documents)} documents")
+                logger.info("Vector store loaded with %d documents", len(self.documents))
                 return True
             except Exception as e:
-                print(f"Error loading vector store: {e}")
+                logger.exception("Error loading vector store: %s", e)
                 return False
         return False
     
@@ -96,6 +115,10 @@ class VectorStore:
     def search(self, query: str, top_k: int = TOP_K_RESULTS) -> List[Dict[str, Any]]:
         """Search for relevant documents using semantic similarity"""
         # Create embedding for query
+        if self.embeddings is None:
+            logger.debug("No embeddings available for search. Returning empty results.")
+            return []
+
         query_embedding = self.create_embeddings([query])[0]
         
         # Calculate similarities

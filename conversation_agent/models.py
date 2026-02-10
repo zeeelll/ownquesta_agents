@@ -18,10 +18,10 @@ class ConversationResponse(BaseModel):
     """Response model for conversation endpoint"""
     response: str = Field(..., description="Assistant's response")
     sources: List[str] = Field(
-        default=[],
+        default_factory=list,
         description="Source document IDs used to generate the response"
     )
     conversation_history: List[ConversationMessage] = Field(
-        default=[],
+        default_factory=list,
         description="Updated conversation history"
     )

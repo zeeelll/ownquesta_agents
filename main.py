@@ -2,8 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import importlib
 import logging
-from typing import Optional
+import os
+from typing import Optional, List, Dict, Any
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -30,39 +32,56 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
     """
     try:
         mod = importlib.import_module(module_path)
-        router = getattr(mod, attr)
-        logger.info(f"Successfully loaded router: {module_path}")
-        return router
     except ImportError as e:
         logger.warning(f"Router module not available: {module_path} - {e}")
         return None
-    except AttributeError as e:
-        logger.error(f"Router attribute '{attr}' not found in {module_path} - {e}")
-        return None
     except Exception as e:
-        logger.error(f"Unexpected error loading {module_path}: {e}")
+        logger.error(f"Unexpected error importing {module_path}: {e}")
         return None
 
-# Load optional routers with better logging
-logger.info("Loading optional router modules...")
-ml_validation_router = try_import_router("ml_validation_agent.endpoint")
-conversation_router = try_import_router("conversation_agent.endpoint")
-eda_router = try_import_router("eda_agent.endpoint")
+    router = getattr(mod, attr, None)
+    if router is None:
+        logger.warning(f"Module '{module_path}' does not expose attribute '{attr}'")
+        return None
 
-# Load ML Assistant Agent
-logger.info("Loading ML Assistant Agent...")
-ml_assistant_router = None
+    # Basic validation: ensure the object exposes 'routes' (APIRouter-compatible)
+    try:
+        if not hasattr(router, "routes"):
+            logger.error(f"Imported attribute '{attr}' from {module_path}' is not a valid router (missing 'routes')")
+            return None
+    except Exception as e:
+        logger.error(f"Error validating router from {module_path}: %s", e)
+        return None
 
-# Load ML Assistant router
-try:
-    from ml_assistant_agent.router import router as ml_assistant_router
-    logger.info("ML Assistant router loaded successfully")
-except ImportError as e:
-    logger.error(f"Failed to import ML Assistant router: {e}")
-    ml_assistant_router = None
-except Exception as e:
-    logger.error(f"Unexpected error loading ML Assistant router: {e}")
-    ml_assistant_router = None
+    logger.info(f"Successfully loaded router: {module_path}.{attr}")
+    return router
+
+# Agent registry and controlled loading
+AGENT_REGISTRY = {
+    
+    "conversation": {"module": "conversation_agent.endpoint", "attr": "router", "prefix": "/conversation", "name": "Conversation Agent"},
+}
+
+# Read ENABLED_AGENTS from environment (comma-separated keys from AGENT_REGISTRY)
+enabled_env = os.getenv("ENABLED_AGENTS")
+if enabled_env:
+    enabled_keys = {k.strip() for k in enabled_env.split(",") if k.strip()}
+    logger.info("ENABLED_AGENTS set; attempting to load: %s", enabled_keys)
+else:
+    enabled_keys = set(AGENT_REGISTRY.keys())
+    logger.info("Loading optional router modules... (all enabled)")
+
+# Attempt to import configured agents
+agent_routers: Dict[str, Optional[object]] = {}
+for key, meta in AGENT_REGISTRY.items():
+    if key not in enabled_keys:
+        agent_routers[key] = None
+        logger.info("Skipping agent '%s' (disabled by ENABLED_AGENTS)", key)
+        continue
+    agent_routers[key] = try_import_router(meta["module"], meta.get("attr", "router"))
+
+# Expose variables used elsewhere for backwards compatibility
+conversation_router = agent_routers.get("conversation")
 
 # Create main FastAPI application
 app = FastAPI(
@@ -105,53 +124,24 @@ def health():
     """Comprehensive health check for all agents"""
     agent_status = {}
     
-    # Check ML Assistant Agent
-    if ml_assistant_router:
-        agent_status["ml_assistant"] = "available"
-    else:
-        agent_status["ml_assistant"] = "unavailable"
-    
     # Check other agents
-    agent_status["ml_validation"] = "available" if ml_validation_router else "unavailable"
     agent_status["conversation"] = "available" if conversation_router else "unavailable"
-    agent_status["eda"] = "available" if eda_router else "unavailable"
     
     overall_status = "ok" if any(status == "available" for status in agent_status.values()) else "degraded"
-    
+
     return {
         "status": overall_status,
-        "timestamp": __import__("time").strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "agents": agent_status,
         "version": "1.0.0"
     }
 
 
-def get_available_agents():
+def get_available_agents() -> List[Dict[str, Any]]:
     """Get list of available agent endpoints"""
-    agents = []
+    agents: List[Dict[str, Any]] = []
     
-    if ml_assistant_router:
-        agents.append({
-            "name": "ML Assistant", 
-            "prefix": "/ml-assistant",
-            "description": "Advanced ML workflow assistance with goal-based task detection, EDA, validation, and AI chat",
-            "features": [
-                "Automatic ML task detection (classification, regression, clustering, anomaly detection)",
-                "Goal-based model recommendations", 
-                "Advanced dataset validation",
-                "Comprehensive EDA with statistical analysis",
-                "AI-powered chat assistance",
-                "Code documentation generation"
-            ],
-            "endpoints": ["/upload", "/eda", "/validate", "/advanced-validate", "/goal-analyze", "/chat", "/docs", "/health", "/files"]
-        })
     
-    if ml_validation_router:
-        agents.append({
-            "name": "ML Validation",
-            "prefix": "/ml-validation",
-            "description": "Machine learning model validation services"
-        })
     
     if conversation_router:
         agents.append({
@@ -160,12 +150,6 @@ def get_available_agents():
             "description": "AI-powered conversational assistant with RAG capabilities"
         })
     
-    if eda_router:
-        agents.append({
-            "name": "EDA Agent", 
-            "prefix": "/eda",
-            "description": "Exploratory data analysis services"
-        })
     
     return agents
 
@@ -176,14 +160,8 @@ def meta():
     endpoints = ["/", "/health", "/meta.json"]
     
     # Add available agent endpoints
-    if ml_assistant_router:
-        endpoints.append("/ml-assistant")
-    if ml_validation_router:
-        endpoints.append("/ml-validation")
     if conversation_router:
         endpoints.append("/conversation")
-    if eda_router:
-        endpoints.append("/eda")
     
     return {
         "name": "ownquesta-agent-api",
@@ -193,53 +171,10 @@ def meta():
         "agents": get_available_agents()
     }
 
-
-# Include routers for available agents
-logger.info("Registering available agent routers...")
-
-if ml_assistant_router is not None:
-    app.include_router(
-        ml_assistant_router, 
-        prefix="/ml-assistant", 
-        tags=["ML Assistant Agent"]
-    )
-    logger.info("ML Assistant Agent registered at /ml-assistant")
-
-if ml_validation_router is not None:
-    app.include_router(
-        ml_validation_router, 
-        prefix="/ml-validation", 
-        tags=["ML Validation Agent"]
-    )
-    logger.info("ML Validation Agent registered at /ml-validation")
-
-if conversation_router is not None:
-    app.include_router(
-        conversation_router, 
-        prefix="/conversation", 
-        tags=["Conversation Agent"]
-    )
-    logger.info("Conversation Agent registered at /conversation")
-
-if eda_router is not None:
-    app.include_router(
-        eda_router, 
-        prefix="/eda", 
-        tags=["EDA Agent"]
-    )
-    logger.info("EDA Agent registered at /eda")
-
 # Log startup summary
-total_agents = sum([
-    ml_assistant_router is not None,
-    ml_validation_router is not None, 
+total_agents = sum([ 
     conversation_router is not None,
-    eda_router is not None
 ])
-
-logger.info(f"OwnQuesta Agent API started with {total_agents} active agents")
-if total_agents == 0:
-    logger.warning("No agents are available! Check your dependencies and configuration.")
 
 # Add startup event
 @app.on_event("startup")
