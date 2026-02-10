@@ -33,8 +33,25 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
     try:
         mod = importlib.import_module(module_path)
     except ImportError as e:
-        logger.warning(f"Router module not available: {module_path} - {e}")
-        return None
+        logger.warning(f"Router module import failed: {module_path} - {e}")
+        # Fallback: attempt to load module by file path (useful when running from different CWDs)
+        try:
+            module_file = Path(__file__).parent / (module_path + ".py")
+            if module_file.exists():
+                spec = importlib.util.spec_from_file_location(module_path, str(module_file))
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)  # type: ignore
+                    logger.info(f"Loaded router module from file: {module_file}")
+                else:
+                    logger.warning(f"Could not create spec for module file: {module_file}")
+                    return None
+            else:
+                logger.warning(f"Router module not available: {module_path} - {e}")
+                return None
+        except Exception as ex:
+            logger.error(f"Fallback loader failed for {module_path}: {ex}")
+            return None
     except Exception as e:
         logger.error(f"Unexpected error importing {module_path}: {e}")
         return None
@@ -59,7 +76,7 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
 # Agent registry and controlled loading
 AGENT_REGISTRY = {
     "conversation": {"module": "conversation_agent.endpoint", "attr": "router", "prefix": "/conversation", "name": "Conversation Agent"},
-    "validation": {"module": "validation_endpoint", "attr": "router", "prefix": "/validation", "name": "Validation Agent"},
+    "validation": {"module": "validation_agent.endpoint", "attr": "router", "prefix": "/validation", "name": "Validation Agent"},
 }
 
 # Read ENABLED_AGENTS from environment (comma-separated keys from AGENT_REGISTRY)

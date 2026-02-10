@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from validation_agent import perform_advanced_eda_from_csv_text
+from .config import perform_advanced_eda_from_csv_text
 import json
+from pathlib import Path
+from fastapi.responses import PlainTextResponse
 
 router = APIRouter()
 
@@ -46,3 +48,18 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error performing validation upload: {str(e)}"
         )
+
+
+@router.get("/ui")
+async def get_ui_component():
+    """Return the raw React component source for the Validation Agent UI."""
+    try:
+        p = Path(__file__).parent / 'ui_component.jsx'
+        if not p.exists():
+            raise HTTPException(status_code=404, detail='UI component not found')
+        text = p.read_text(encoding='utf-8')
+        return PlainTextResponse(text, media_type='text/javascript')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
