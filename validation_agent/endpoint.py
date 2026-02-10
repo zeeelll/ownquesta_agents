@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from .config import perform_advanced_eda_from_csv_text
+from .config import perform_advanced_eda_from_csv_text, analyze_user_question
 import json
 from pathlib import Path
 from fastapi.responses import PlainTextResponse
@@ -14,9 +14,14 @@ class ValidationRequest(BaseModel):
     goal: Optional[Dict[str, Any]] = None
 
 
+class QuestionRequest(BaseModel):
+    question: str
+    eda_results: Dict[str, Any]
+
+
 @router.post("/analyze")
 async def analyze_csv(req: ValidationRequest):
-    """Analyze CSV text and return an EDA summary produced by the validation agent."""
+    """Analyze CSV text and return an enhanced EDA summary produced by the validation agent."""
     try:
         result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
         return {"status": "success", "result": result}
@@ -27,9 +32,22 @@ async def analyze_csv(req: ValidationRequest):
         )
 
 
+@router.post("/question")
+async def answer_question(req: QuestionRequest):
+    """Answer intelligent questions about the analyzed dataset."""
+    try:
+        answer = analyze_user_question(req.question, req.eda_results)
+        return {"status": "success", "answer": answer}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error answering question: {str(e)}"
+        )
+
+
 @router.post("/validate")
 async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Form(None)):
-    """Accept a multipart file upload (CSV) and optional goal form field, run EDA and return result."""
+    """Accept a multipart file upload (CSV) and optional goal form field, run enhanced EDA and return result."""
     try:
         raw = await file.read()
         text = raw.decode('utf-8', errors='ignore')
