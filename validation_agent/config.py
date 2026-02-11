@@ -25,7 +25,7 @@ load_dotenv(dotenv_path=env_path)
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-CHAT_MODEL = "gpt-4o-mini"  # Using GPT-4o-mini for better performance
+CHAT_MODEL = "gpt-5-mini"  # Using GPT-5-mini for better performance
 TEMPERATURE = 0.3
 MAX_TOKENS = 1000
 
