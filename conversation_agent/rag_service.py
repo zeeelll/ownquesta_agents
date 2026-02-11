@@ -174,15 +174,40 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
                 "OpenAI client not configured. Set OPENAI_API_KEY in environment or .env to enable chat functionality."
             )
 
-        response = self.client.chat.completions.create(
-            model=CHAT_MODEL,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=MAX_TOKENS
-        )
+        try:
+            # Ensure message contents are strings
+            safe_messages = [{'role': m['role'], 'content': str(m['content'])} for m in messages]
 
-        assistant_response = response.choices[0].message.content
-        return assistant_response, source_ids
+            response = self.client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=safe_messages,
+                temperature=temperature,
+                max_tokens=MAX_TOKENS
+            )
+
+            assistant_response = response.choices[0].message.content
+            return assistant_response, source_ids
+
+        except Exception as e:
+            # Log detailed debug information to help diagnose 400 errors from OpenAI
+            try:
+                logger.exception("OpenAI chat completion failed: %s", e)
+                # If the underlying httpx response is available, try to log its text
+                if hasattr(e, 'response') and getattr(e.response, 'text', None):
+                    logger.error("OpenAI response body: %s", e.response.text)
+            except Exception:
+                # ignore logging failures
+                pass
+
+            # Also log the outgoing payload (truncated)
+            try:
+                import json as _json
+                logger.error("Chat request payload (truncated): %s", _json.dumps(messages)[:2000])
+            except Exception:
+                pass
+
+            # Reraise a clearer runtime error for upstream handling
+            raise RuntimeError(f"OpenAI chat completion failed: {str(e)}")
     
     def chat(
         self,
