@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from .config import perform_advanced_eda_from_csv_text, analyze_user_question, perform_ml_validation_from_eda
+from .config import perform_advanced_eda_from_csv_text, analyze_user_question, perform_ml_validation_from_eda, generate_ai_insights
 import json
 from pathlib import Path
 from fastapi.responses import PlainTextResponse
@@ -19,6 +19,12 @@ class QuestionRequest(BaseModel):
     eda_results: Dict[str, Any]
 
 
+class AskRequest(BaseModel):
+    csv_text: str
+    question: str
+    goal: Optional[Dict[str, Any]] = None
+
+
 @router.post("/analyze")
 async def analyze_csv(req: ValidationRequest):
     """Analyze CSV text and return an enhanced EDA summary produced by the validation agent."""
@@ -26,6 +32,13 @@ async def analyze_csv(req: ValidationRequest):
         print(f"DEBUG: Received request with csv_text length: {len(req.csv_text)}")
         result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
         print(f"DEBUG: EDA completed, result keys: {list(result.keys())}")
+        # Add AI-powered insights when available (returns friendly message if OpenAI not configured)
+        try:
+            ai_insights = generate_ai_insights(result)
+            result['aiInsights'] = ai_insights
+        except Exception as e:
+            print(f"DEBUG: generate_ai_insights failed: {e}")
+
         response_data = {"status": "success", "result": result}
         print(f"DEBUG: Response data created, size: {len(str(response_data))}")
         return response_data
@@ -96,4 +109,31 @@ async def get_ui_component():
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/ask")
+async def ask_question(req: AskRequest):
+    """Answer a user question given CSV text by running EDA then an analysis function."""
+    try:
+        # Run EDA to build context
+        eda_result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
+        # Use rule-based/question analyzer (or AI if configured)
+        answer = analyze_user_question(req.question, eda_result)
+        return {"status": "success", "answer": answer, "eda": eda_result}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/question")
+async def question_endpoint(req: QuestionRequest):
+    """Accept a question plus existing EDA results and return an answer."""
+    try:
+        answer = analyze_user_question(req.question, req.eda_results)
+        return {"status": "success", "answer": answer}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

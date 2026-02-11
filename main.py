@@ -119,8 +119,10 @@ for key, meta in AGENT_REGISTRY.items():
     agent_routers[key] = try_import_router(meta["module"], meta.get("attr", "router"))
 
 # Expose variables used elsewhere for backwards compatibility
-conversation_router = agent_routers.get("conversation")
-validation_router = agent_routers.get("validation")
+# Map commonly-used agent keys to discovered routers. discovery uses folder names
+# like 'validation_agent' or 'conversation_agent', so match by substring.
+conversation_router = next((r for k, r in agent_routers.items() if r is not None and 'conversation' in k), None)
+validation_router = next((r for k, r in agent_routers.items() if r is not None and 'validation' in k), None)
 
 # Create main FastAPI application
 app = FastAPI(
