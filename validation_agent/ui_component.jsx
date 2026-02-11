@@ -1,86 +1,661 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Send, Code, BarChart3, CheckCircle, XCircle, Loader2, FileText, TrendingUp, AlertCircle, Target, Brain } from 'lucide-react';
+import { Upload, Send, Code, BarChart3, CheckCircle, XCircle, Loader2, FileText, TrendingUp, AlertCircle, Target, Brain, Play, Database, Zap, MessageSquare } from 'lucide-react';
 
 const ValidationAgenticAI = () => {
-  const [messages, setMessages] = useState([
-    { type: 'agent', content: 'Hello! I\'m your Validation Agentic AI. Upload your dataset (CSV format) and tell me your goal - I\'ll help you validate and analyze it with tailored insights!' }
-  ]);
+  const [currentStep, setCurrentStep] = useState('upload'); // upload, processing, results
   const [input, setInput] = useState('');
   const [file, setFile] = useState(null);
   const [dataset, setDataset] = useState(null);
   const [edaResults, setEdaResults] = useState(null);
+  const [mlResults, setMlResults] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [awaitingGoal, setAwaitingGoal] = useState(false);
-  const [userGoal, setUserGoal] = useState(null);
+  const [detectedGoal, setDetectedGoal] = useState(null);
   const [showCode, setShowCode] = useState(false);
-  const messagesEndRef = useRef(null);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [questions, setQuestions] = useState([]);
+  const [currentQuestion, setCurrentQuestion] = useState('');
   const fileInputRef = useRef(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, edaResults]);
-
-  const parseCSV = (text) => {
-    const lines = text.split('\n').filter(line => line.trim());
-    const headers = lines[0].split(',').map(h => h.trim());
-    const rows = lines.slice(1).map(line => {
-      const values = line.split(',').map(v => v.trim());
-      const row = {};
-      headers.forEach((header, i) => {
-        row[header] = values[i];
-      });
-      return row;
-    });
-    return { headers, rows };
-  };
 
   const detectGoal = (userInput) => {
     const input = userInput.toLowerCase();
-    
+
     // Supervised learning keywords
-    const supervisedKeywords = ['predict', 'classification', 'regression', 'forecast', 'supervised', 
+    const supervisedKeywords = ['predict', 'classification', 'regression', 'forecast', 'supervised',
                                 'target', 'label', 'outcome', 'predict price', 'predict sales',
-                                'classify', 'categorize'];
-    
+                                'classify', 'categorize', 'model', 'train'];
+
     // Unsupervised learning keywords
-    const unsupervisedKeywords = ['cluster', 'segment', 'pattern', 'group', 'unsupervised', 
-                                  'anomaly', 'outlier', 'similarity', 'discover'];
-    
+    const unsupervisedKeywords = ['cluster', 'segment', 'pattern', 'group', 'unsupervised',
+                                  'anomaly', 'outlier', 'similarity', 'discover', 'grouping'];
+
     // EDA/Analysis keywords
-    const edaKeywords = ['analyze', 'explore', 'understand', 'insights', 'statistics', 
-                         'visualize', 'eda', 'exploratory'];
-    
+    const edaKeywords = ['analyze', 'explore', 'understand', 'insights', 'statistics',
+                         'visualize', 'eda', 'exploratory', 'summary'];
+
     const supervisedScore = supervisedKeywords.filter(kw => input.includes(kw)).length;
     const unsupervisedScore = unsupervisedKeywords.filter(kw => input.includes(kw)).length;
     const edaScore = edaKeywords.filter(kw => input.includes(kw)).length;
-    
+
     if (supervisedScore > unsupervisedScore && supervisedScore > edaScore) {
       return {
         type: 'supervised',
         description: 'Supervised Learning (Prediction/Classification)',
-        focus: ['Target variable identification', 'Feature importance', 'Missing value impact', 
+        focus: ['Target variable identification', 'Feature importance', 'Missing value impact',
                 'Class balance (if classification)', 'Feature correlations with target']
       };
     } else if (unsupervisedScore > supervisedScore && unsupervisedScore > edaScore) {
       return {
         type: 'unsupervised',
         description: 'Unsupervised Learning (Clustering/Pattern Discovery)',
-        focus: ['Feature scaling requirements', 'Outlier detection', 'Feature variance', 
+        focus: ['Feature scaling requirements', 'Outlier detection', 'Feature variance',
                 'Correlation patterns', 'Dimensionality considerations']
       };
     } else {
       return {
         type: 'eda',
         description: 'Exploratory Data Analysis',
-        focus: ['Data quality assessment', 'Statistical summaries', 'Distribution analysis', 
+        focus: ['Data quality assessment', 'Statistical summaries', 'Distribution analysis',
                 'Correlation insights', 'Missing data patterns']
       };
     }
   };
+
+  const handleFileUpload = async (e) => {
+    const uploadedFile = e.target.files[0];
+    if (!uploadedFile) return;
+
+    if (!uploadedFile.name.endsWith('.csv')) {
+      alert('Please upload a CSV file only.');
+      return;
+    }
+
+    setFile(uploadedFile);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const csvText = event.target.result;
+        setDataset(csvText);
+
+        // Quick parse for display
+        const lines = csvText.split('\n').filter(line => line.trim());
+        const headers = lines[0].split(',').map(h => h.trim());
+        const rows = lines.slice(1);
+
+        setCurrentStep('goal_input');
+      } catch (error) {
+        alert('Error parsing CSV file. Please ensure it\'s properly formatted.');
+      }
+    };
+    reader.readAsText(uploadedFile);
+  };
+
+  const startAnalysis = async () => {
+    if (!input.trim() || !dataset) return;
+
+    const goal = detectGoal(input);
+    setDetectedGoal(goal);
+    setCurrentStep('processing');
+    setIsProcessing(true);
+
+    try {
+      // Call ML validation endpoint which includes EDA
+      const response = await fetch('/validation/ml_validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          csv_text: dataset,
+          goal: goal
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.status === 'success') {
+        setEdaResults(result.eda_result);
+        setMlResults(result.ml_result);
+        setCurrentStep('results');
+      } else {
+        throw new Error('Analysis failed');
+      }
+    } catch (error) {
+      console.error('Analysis failed:', error);
+      alert(`Analysis failed: ${error.message}`);
+      setCurrentStep('goal_input');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const askQuestion = async () => {
+    if (!currentQuestion.trim() || !edaResults) return;
+
+    const question = currentQuestion.trim();
+    setCurrentQuestion('');
+
+    try {
+      const response = await fetch('/validation/question', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: question,
+          eda_results: edaResults
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setQuestions(prev => [...prev, {
+          question: question,
+          answer: result.answer,
+          timestamp: new Date().toLocaleTimeString()
+        }]);
+      } else {
+        setQuestions(prev => [...prev, {
+          question: question,
+          answer: 'Sorry, I couldn\'t process your question. Please try rephrasing.',
+          timestamp: new Date().toLocaleTimeString()
+        }]);
+      }
+    } catch (error) {
+      setQuestions(prev => [...prev, {
+        question: question,
+        answer: 'Error connecting to analysis service. Please try again.',
+        timestamp: new Date().toLocaleTimeString()
+      }]);
+    }
+  };
+
+  const renderOverview = () => {
+    if (!edaResults) return null;
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <Database className="w-5 h-5 mr-2 text-blue-600" />
+            Dataset Overview
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-blue-50 rounded">
+              <div className="text-2xl font-bold text-blue-600">{edaResults.shape.rows}</div>
+              <div className="text-sm text-gray-600">Rows</div>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded">
+              <div className="text-2xl font-bold text-green-600">{edaResults.shape.columns}</div>
+              <div className="text-sm text-gray-600">Columns</div>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded">
+              <div className="text-2xl font-bold text-purple-600">{edaResults.numericColumns.length}</div>
+              <div className="text-sm text-gray-600">Numeric</div>
+            </div>
+            <div className="text-center p-4 bg-orange-50 rounded">
+              <div className="text-2xl font-bold text-orange-600">{edaResults.objectColumns.length}</div>
+              <div className="text-sm text-gray-600">Categorical</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <Target className="w-5 h-5 mr-2 text-green-600" />
+            Detected Goal: {detectedGoal?.description}
+          </h3>
+          <div className="space-y-2">
+            {detectedGoal?.focus.map((item, index) => (
+              <div key={index} className="flex items-center">
+                <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                <span className="text-sm">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <TrendingUp className="w-5 h-5 mr-2 text-blue-600" />
+            Data Quality Assessment
+          </h3>
+          <div className="space-y-3">
+            {edaResults.insights?.dataQuality.map((insight, index) => (
+              <div key={index} className="p-3 bg-gray-50 rounded text-sm">
+                {insight}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderEDA = () => {
+    if (!edaResults) return null;
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Numerical Features Summary</h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-full table-auto">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-2 text-left">Feature</th>
+                  <th className="px-4 py-2 text-left">Count</th>
+                  <th className="px-4 py-2 text-left">Mean</th>
+                  <th className="px-4 py-2 text-left">Median</th>
+                  <th className="px-4 py-2 text-left">Mode</th>
+                  <th className="px-4 py-2 text-left">Std</th>
+                  <th className="px-4 py-2 text-left">IQR</th>
+                  <th className="px-4 py-2 text-left">Skewness</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(edaResults.numericalSummary).map(([col, stats]) => (
+                  <tr key={col} className="border-t">
+                    <td className="px-4 py-2 font-medium">{col}</td>
+                    <td className="px-4 py-2">{stats.count}</td>
+                    <td className="px-4 py-2">{stats.mean}</td>
+                    <td className="px-4 py-2">{stats.median}</td>
+                    <td className="px-4 py-2">{stats.mode || 'N/A'}</td>
+                    <td className="px-4 py-2">{stats.std}</td>
+                    <td className="px-4 py-2">{stats.iqr}</td>
+                    <td className="px-4 py-2">{stats.skewness}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Categorical Features Summary</h3>
+          <div className="space-y-4">
+            {Object.entries(edaResults.objectSummary).map(([col, stats]) => (
+              <div key={col} className="border rounded p-4">
+                <h4 className="font-medium mb-2">{col}</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>Unique: {stats.unique}</div>
+                  <div>Entropy: {stats.entropy}</div>
+                  <div>Top Value: {stats.topValues[0]?.value}</div>
+                  <div>Top %: {stats.topValues[0]?.percentage}%</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Correlation Matrix</h3>
+          {Object.keys(edaResults.correlation).length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full table-auto">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="px-4 py-2 text-left">Features</th>
+                    {Object.keys(edaResults.correlation).map(col => (
+                      <th key={col} className="px-4 py-2 text-left">{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(edaResults.correlation).map(([col1, corrs]) => (
+                    <tr key={col1} className="border-t">
+                      <td className="px-4 py-2 font-medium">{col1}</td>
+                      {Object.values(corrs).map((val, idx) => (
+                        <td key={idx} className="px-4 py-2">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            Math.abs(val) > 0.7 ? 'bg-red-100 text-red-800' :
+                            Math.abs(val) > 0.5 ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {val.toFixed(2)}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-gray-500">No correlations available (need at least 2 numeric columns)</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMLValidation = () => {
+    if (!mlResults) return null;
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <Brain className="w-5 h-5 mr-2 text-purple-600" />
+            ML Validation Results
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="font-medium mb-2">Preprocessing Steps</h4>
+              <div className="space-y-2">
+                {mlResults.preprocessingSteps?.map((step, index) => (
+                  <div key={index} className="p-3 bg-blue-50 rounded">
+                    <div className="font-medium text-blue-800">{step.step}</div>
+                    <div className="text-sm text-blue-600">{step.description}</div>
+                    <div className="text-xs text-blue-500 mt-1">Priority: {step.priority}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium mb-2">Feature Engineering</h4>
+              <div className="space-y-2">
+                {mlResults.featureEngineering?.map((feat, index) => (
+                  <div key={index} className="p-3 bg-green-50 rounded">
+                    <div className="font-medium text-green-800">{feat.type}</div>
+                    <div className="text-sm text-green-600">{feat.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Recommended Models</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {mlResults.modelRecommendations?.map((model, index) => (
+              <div key={index} className="p-4 border rounded">
+                <h4 className="font-medium text-lg mb-2">{model.algorithm}</h4>
+                <div className="text-sm text-gray-600 mb-2">Type: {model.type}</div>
+                <div className="space-y-1">
+                  <div className="text-sm">
+                    <span className="font-medium text-green-600">Pros:</span> {model.pros.join(', ')}
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-medium text-red-600">Cons:</span> {model.cons.join(', ')}
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-medium text-blue-600">Use Case:</span> {model.use_case}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Validation Metrics</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {mlResults.validationMetrics?.map((metric, index) => (
+              <div key={index} className="text-center p-3 bg-gray-50 rounded">
+                <div className="font-medium">{metric}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {mlResults.risksAndWarnings && mlResults.risksAndWarnings.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold mb-4 flex items-center">
+              <AlertCircle className="w-5 h-5 mr-2 text-red-600" />
+              Risks & Warnings
+            </h3>
+            <div className="space-y-3">
+              {mlResults.risksAndWarnings.map((risk, index) => (
+                <div key={index} className={`p-3 rounded border-l-4 ${
+                  risk.level === 'High' ? 'border-red-500 bg-red-50' :
+                  risk.level === 'Medium' ? 'border-yellow-500 bg-yellow-50' :
+                  'border-blue-500 bg-blue-50'
+                }`}>
+                  <div className="font-medium">{risk.level} Risk</div>
+                  <div className="text-sm">{risk.issue}</div>
+                  <div className="text-sm text-gray-600 mt-1">{risk.description}</div>
+                  <div className="text-sm font-medium mt-1">Mitigation: {risk.mitigation}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Performance Estimates</h3>
+          <div className="p-4 bg-gray-50 rounded">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-bold text-blue-600">{mlResults.performanceEstimates?.confidence || 'Unknown'}</div>
+                <div className="text-sm text-gray-600">Confidence Level</div>
+              </div>
+              <div>
+                <div className="text-lg font-medium text-green-600">{mlResults.performanceEstimates?.expected_accuracy || 'Unknown'}</div>
+                <div className="text-sm text-gray-600">Expected Accuracy</div>
+              </div>
+              <div>
+                <div className="text-lg font-medium text-purple-600">{mlResults.performanceEstimates?.data_sufficiency || 'Unknown'}</div>
+                <div className="text-sm text-gray-600">Data Sufficiency</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCode = () => {
+    if (!mlResults || !mlResults.implementationCode) return null;
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <Code className="w-5 h-5 mr-2 text-blue-600" />
+            EDA Code
+          </h3>
+          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
+            {mlResults.implementationCode.eda_code}
+          </pre>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Preprocessing Code</h3>
+          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
+            {mlResults.implementationCode.preprocessing_code}
+          </pre>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Model Training Code</h3>
+          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
+            {mlResults.implementationCode.model_code}
+          </pre>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Validation Code</h3>
+          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
+            {mlResults.implementationCode.validation_code}
+          </pre>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Complete Pipeline</h3>
+          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
+            {mlResults.implementationCode.full_pipeline}
+          </pre>
+        </div>
+      </div>
+    );
+  };
+
+  const renderQuestions = () => {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4 flex items-center">
+            <MessageSquare className="w-5 h-5 mr-2 text-blue-600" />
+            Ask Questions About Your Data
+          </h3>
+          <div className="flex space-x-2 mb-4">
+            <input
+              type="text"
+              value={currentQuestion}
+              onChange={(e) => setCurrentQuestion(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && askQuestion()}
+              placeholder="Ask anything about your dataset..."
+              className="flex-1 p-2 border rounded"
+            />
+            <button
+              onClick={askQuestion}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {questions.map((q, index) => (
+            <div key={index} className="bg-white rounded-lg shadow p-6">
+              <div className="mb-3">
+                <div className="font-medium text-gray-800">Q: {q.question}</div>
+                <div className="text-xs text-gray-500">{q.timestamp}</div>
+              </div>
+              <div className="text-gray-700">{q.answer}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Validation Agent</h1>
+          <p className="text-gray-600">Upload your dataset, specify your goal, and get comprehensive EDA + ML validation</p>
+        </div>
+
+        {currentStep === 'upload' && (
+          <div className="bg-white rounded-lg shadow p-8 text-center">
+            <Upload className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold mb-4">Upload Your Dataset</h2>
+            <p className="text-gray-600 mb-6">Upload a CSV file to begin the validation process</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Choose CSV File
+            </button>
+          </div>
+        )}
+
+        {currentStep === 'goal_input' && (
+          <div className="bg-white rounded-lg shadow p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold mb-2">Dataset Loaded Successfully!</h2>
+              <p className="text-gray-600">Tell me your goal with this dataset</p>
+            </div>
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && startAnalysis()}
+                placeholder="e.g., 'I want to predict customer churn' or 'I want to cluster products'"
+                className="w-full p-3 border rounded"
+              />
+              <button
+                onClick={startAnalysis}
+                className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center"
+              >
+                <Play className="w-5 h-5 mr-2" />
+                Start ML Validation Process
+              </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 'processing' && (
+          <div className="bg-white rounded-lg shadow p-8 text-center">
+            <Loader2 className="w-16 h-16 text-blue-600 mx-auto mb-4 animate-spin" />
+            <h2 className="text-xl font-semibold mb-4">Analyzing Your Dataset</h2>
+            <p className="text-gray-600">Performing comprehensive EDA and ML validation...</p>
+            <div className="mt-6 space-y-2">
+              <div className="flex items-center">
+                <CheckCircle className="w-5 h-5 text-green-500 mr-2" />
+                <span>Goal Detection: {detectedGoal?.description}</span>
+              </div>
+              <div className="flex items-center">
+                <Loader2 className="w-5 h-5 text-blue-500 mr-2 animate-spin" />
+                <span>Running EDA Analysis...</span>
+              </div>
+              <div className="flex items-center text-gray-400">
+                <div className="w-5 h-5 mr-2"></div>
+                <span>Preparing ML Validation...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 'results' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-lg shadow p-4">
+              <div className="flex space-x-1 mb-4">
+                {[
+                  { id: 'overview', label: 'Overview', icon: Database },
+                  { id: 'eda', label: 'EDA Results', icon: BarChart3 },
+                  { id: 'ml', label: 'ML Validation', icon: Brain },
+                  { id: 'code', label: 'Python Code', icon: Code },
+                  { id: 'questions', label: 'Ask Questions', icon: MessageSquare }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center px-4 py-2 rounded ${
+                      activeTab === tab.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    <tab.icon className="w-4 h-4 mr-2" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="min-h-96">
+                {activeTab === 'overview' && renderOverview()}
+                {activeTab === 'eda' && renderEDA()}
+                {activeTab === 'ml' && renderMLValidation()}
+                {activeTab === 'code' && renderCode()}
+                {activeTab === 'questions' && renderQuestions()}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ValidationAgenticAI;
 
   const generateInsights = (data) => {
     const insights = {
@@ -316,260 +891,44 @@ const ValidationAgenticAI = () => {
     return insights;
   };
 
-  const performAdvancedEDA = async (data, goal) => {
+  const performAdvancedEDA = async (csvText, goal) => {
     setIsProcessing(true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const { headers, rows } = data;
-    const shape = { rows: rows.length, columns: headers.length };
     
-    // Column type detection
-    const columnTypes = {};
-    const numericColumns = [];
-    const objectColumns = [];
-    
-    headers.forEach(col => {
-      const values = rows.map(row => row[col]).filter(v => v);
-      const isNumeric = values.every(v => !isNaN(parseFloat(v)));
-      columnTypes[col] = isNumeric ? 'numerical' : 'categorical';
-      if (isNumeric) numericColumns.push(col);
-      else objectColumns.push(col);
-    });
-
-    // Missing values analysis
-    const missingValues = {};
-    headers.forEach(col => {
-      const missing = rows.filter(row => !row[col] || row[col] === '').length;
-      missingValues[col] = { 
-        count: missing, 
-        percentage: ((missing / rows.length) * 100).toFixed(2),
-        severity: missing / rows.length > 0.5 ? 'High' : missing / rows.length > 0.2 ? 'Medium' : 'Low'
-      };
-    });
-
-    // Unique values
-    const uniqueValues = {};
-    headers.forEach(col => {
-      const unique = new Set(rows.map(row => row[col])).size;
-      uniqueValues[col] = unique;
-    });
-
-    // Advanced numerical summary with variance, IQR, and unique values
-    const numericalSummary = {};
-    numericColumns.forEach(col => {
-      const values = rows.map(row => parseFloat(row[col])).filter(v => !isNaN(v));
-      if (values.length > 0) {
-        const sorted = values.sort((a, b) => a - b);
-        const mean = values.reduce((a, b) => a + b, 0) / values.length;
-        const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-        const std = Math.sqrt(variance);
-        const skewness = values.reduce((sum, val) => sum + Math.pow((val - mean) / std, 3), 0) / values.length;
-        
-        // Quartiles and IQR calculation
-        const q1 = sorted[Math.floor(sorted.length * 0.25)];
-        const q3 = sorted[Math.floor(sorted.length * 0.75)];
-        const iqr = q3 - q1;
-        const lowerBound = q1 - 1.5 * iqr;
-        const upperBound = q3 + 1.5 * iqr;
-        const outliers = values.filter(v => v < lowerBound || v > upperBound).length;
-        
-        // Unique values count
-        const uniqueCount = new Set(values).size;
-        
-        // Range
-        const range = Math.max(...values) - Math.min(...values);
-        
-        numericalSummary[col] = {
-          count: values.length,
-          unique: uniqueCount,
-          mean: mean.toFixed(2),
-          median: sorted[Math.floor(sorted.length / 2)].toFixed(2),
-          std: std.toFixed(2),
-          variance: variance.toFixed(2),
-          min: Math.min(...values).toFixed(2),
-          max: Math.max(...values).toFixed(2),
-          range: range.toFixed(2),
-          q1: q1.toFixed(2),
-          q3: q3.toFixed(2),
-          iqr: iqr.toFixed(2),
-          lowerBound: lowerBound.toFixed(2),
-          upperBound: upperBound.toFixed(2),
-          skewness: skewness.toFixed(2),
-          outliers: outliers,
-          outliersPercentage: ((outliers / values.length) * 100).toFixed(2),
-          coefficientOfVariation: ((std / mean) * 100).toFixed(2),
-          isNormalDist: Math.abs(skewness) < 0.5 ? 'Approximately Normal' : Math.abs(skewness) < 1 ? 'Moderately Skewed' : 'Highly Skewed'
-        };
+    try {
+      // Call the backend API
+      const response = await fetch('/validation/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          csv_text: csvText,
+          goal: goal
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
       }
-    });
-
-    // Categorical summary
-    const objectSummary = {};
-    objectColumns.forEach(col => {
-      const values = rows.map(row => row[col]).filter(v => v);
-      const frequency = {};
-      values.forEach(v => {
-        frequency[v] = (frequency[v] || 0) + 1;
-      });
-      const topValues = Object.entries(frequency)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
       
-      const uniqueCount = Object.keys(frequency).length;
-      const entropy = -Object.values(frequency).reduce((sum, count) => {
-        const p = count / values.length;
-        return sum + (p * Math.log2(p));
-      }, 0);
+      const result = await response.json();
       
-      objectSummary[col] = {
-        count: values.length,
-        unique: uniqueCount,
-        uniquePercentage: ((uniqueCount / values.length) * 100).toFixed(2),
-        entropy: entropy.toFixed(2),
-        topValues: topValues.map(([val, count]) => ({ 
-          value: val, 
-          count, 
-          percentage: ((count / values.length) * 100).toFixed(2)
-        })),
-        isPotentialTarget: uniqueCount >= 2 && uniqueCount <= 20 && goal.type === 'supervised'
-      };
-    });
-
-    // Correlation analysis
-    const correlation = {};
-    if (numericColumns.length > 1) {
-      numericColumns.forEach(col1 => {
-        correlation[col1] = {};
-        numericColumns.forEach(col2 => {
-          const values1 = rows.map(row => parseFloat(row[col1])).filter(v => !isNaN(v));
-          const values2 = rows.map(row => parseFloat(row[col2])).filter(v => !isNaN(v));
-          
-          if (values1.length > 0 && values2.length > 0) {
-            const mean1 = values1.reduce((a, b) => a + b, 0) / values1.length;
-            const mean2 = values2.reduce((a, b) => a + b, 0) / values2.length;
-            
-            let numerator = 0;
-            let sum1 = 0;
-            let sum2 = 0;
-            
-            for (let i = 0; i < Math.min(values1.length, values2.length); i++) {
-              numerator += (values1[i] - mean1) * (values2[i] - mean2);
-              sum1 += Math.pow(values1[i] - mean1, 2);
-              sum2 += Math.pow(values2[i] - mean2, 2);
-            }
-            
-            const corr = numerator / Math.sqrt(sum1 * sum2);
-            correlation[col1][col2] = isNaN(corr) ? 0 : parseFloat(corr.toFixed(2));
-          }
-        });
-      });
+      if (result.status === 'success') {
+        setEdaResults(result.result);
+        setIsProcessing(false);
+        return result.result;
+      } else {
+        throw new Error('Analysis failed');
+      }
+    } catch (error) {
+      console.error('EDA API call failed:', error);
+      setMessages(prev => [...prev, { 
+        type: 'agent', 
+        content: `❌ Error performing analysis: ${error.message}. Please try again.` 
+      }]);
+      setIsProcessing(false);
+      return null;
     }
-
-    // Goal-specific validation
-    const validationChecks = {
-      hasData: rows.length > 0,
-      hasColumns: headers.length > 0,
-      noEmptyColumns: headers.every(col => rows.some(row => row[col])),
-      missingDataLevel: Object.values(missingValues).every(m => parseFloat(m.percentage) < 50) ? 'Acceptable' : 'High',
-      dataQuality: rows.length > 30 ? 'Good' : rows.length > 10 ? 'Fair' : 'Limited',
-      sufficientSamples: rows.length >= 100 ? 'Excellent' : rows.length >= 30 ? 'Good' : 'Limited'
-    };
-
-    // Goal-specific recommendations
-    const recommendations = [];
-    
-    if (goal.type === 'supervised') {
-      const potentialTargets = objectColumns.filter(col => 
-        objectSummary[col].unique >= 2 && objectSummary[col].unique <= 20
-      );
-      
-      if (potentialTargets.length > 0) {
-        recommendations.push(`🎯 Potential target variables: ${potentialTargets.join(', ')}`);
-      }
-      
-      const highCorrelations = [];
-      Object.entries(correlation).forEach(([col1, corrs]) => {
-        Object.entries(corrs).forEach(([col2, val]) => {
-          if (col1 !== col2 && Math.abs(val) > 0.8) {
-            highCorrelations.push(`${col1} ↔ ${col2} (${val})`);
-          }
-        });
-      });
-      
-      if (highCorrelations.length > 0) {
-        recommendations.push(`⚠️ High multicollinearity detected - consider feature selection`);
-      }
-      
-      const imbalancedCategorical = objectColumns.filter(col => {
-        const topValue = objectSummary[col].topValues[0];
-        return topValue && parseFloat(topValue.percentage) > 80;
-      });
-      
-      if (imbalancedCategorical.length > 0) {
-        recommendations.push(`⚖️ Imbalanced classes detected in: ${imbalancedCategorical.join(', ')}`);
-      }
-    }
-    
-    if (goal.type === 'unsupervised') {
-      const highVarianceFeatures = numericColumns.filter(col => 
-        parseFloat(numericalSummary[col].coefficientOfVariation) > 100
-      );
-      
-      if (highVarianceFeatures.length > 0) {
-        recommendations.push(`📊 High variance features (consider scaling): ${highVarianceFeatures.join(', ')}`);
-      }
-      
-      const outlierColumns = numericColumns.filter(col => 
-        parseFloat(numericalSummary[col].outliersPercentage) > 5
-      );
-      
-      if (outlierColumns.length > 0) {
-        recommendations.push(`🔍 Outliers detected in: ${outlierColumns.join(', ')} - may affect clustering`);
-      }
-      
-      if (numericColumns.length > 10) {
-        recommendations.push(`📉 Consider dimensionality reduction (PCA) - ${numericColumns.length} features detected`);
-      }
-    }
-
-    // Generate comprehensive insights
-    const insights = generateInsights({
-      shape,
-      numericColumns,
-      objectColumns,
-      missingValues,
-      numericalSummary,
-      objectSummary,
-      correlation,
-      validationChecks,
-      goal
-    });
-
-    const isValid = validationChecks.hasData && 
-                    validationChecks.hasColumns && 
-                    validationChecks.noEmptyColumns &&
-                    validationChecks.missingDataLevel === 'Acceptable';
-
-    setEdaResults({
-      shape,
-      columns: headers,
-      columnTypes,
-      numericColumns,
-      objectColumns,
-      missingValues,
-      uniqueValues,
-      numericalSummary,
-      objectSummary,
-      correlation,
-      validationChecks,
-      isValid,
-      goal,
-      recommendations,
-      insights
-    });
-
-    setIsProcessing(false);
-    return { validationChecks, isValid, recommendations, insights };
   };
 
   const handleFileUpload = async (e) => {
@@ -590,13 +949,17 @@ const ValidationAgenticAI = () => {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const text = event.target.result;
-        const parsedData = parseCSV(text);
-        setDataset(parsedData);
+        const csvText = event.target.result;
+        setDataset(csvText); // Store raw CSV text
+        
+        // Quick parse for display
+        const lines = csvText.split('\n').filter(line => line.trim());
+        const headers = lines[0].split(',').map(h => h.trim());
+        const rows = lines.slice(1);
         
         setMessages(prev => [...prev, { 
           type: 'agent', 
-          content: `✅ Dataset loaded successfully!\n\n📊 Dataset Info:\n- Rows: ${parsedData.rows.length}\n- Columns: ${parsedData.headers.length}\n- Column Names: ${parsedData.headers.join(', ')}\n\n🎯 What's your goal with this dataset?\n\nExamples:\n• "I want to predict sales"\n• "I want to cluster customers"\n• "Just explore and analyze the data"\n\nTell me your goal, and I'll tailor the analysis accordingly!` 
+          content: `✅ Dataset loaded successfully!\n\n📊 Dataset Info:\n- Rows: ${rows.length}\n- Columns: ${headers.length}\n- Column Names: ${headers.join(', ')}\n\n🎯 What's your goal with this dataset?\n\nExamples:\n• "I want to predict sales"\n• "I want to cluster customers"\n• "Just explore and analyze the data"\n\nTell me your goal, and I'll tailor the analysis accordingly!` 
         }]);
         setAwaitingGoal(true);
       } catch (error) {
@@ -629,28 +992,30 @@ const ValidationAgenticAI = () => {
       
       const result = await performAdvancedEDA(dataset, detectedGoal);
       
-      let conclusionMsg = `✅ **Analysis Complete!**\n\n`;
-      conclusionMsg += `${result.isValid ? '✅ Dataset Validation: PASSED' : '⚠️ Dataset Validation: ISSUES DETECTED'}\n\n`;
-      
-      if (result.recommendations.length > 0) {
-        conclusionMsg += `**Key Recommendations:**\n${result.recommendations.join('\n')}\n\n`;
+      if (result) {
+        let conclusionMsg = `✅ **Analysis Complete!**\n\n`;
+        conclusionMsg += `${result.isValid ? '✅ Dataset Validation: PASSED' : '⚠️ Dataset Validation: ISSUES DETECTED'}\n\n`;
+        
+        if (result.recommendations && result.recommendations.length > 0) {
+          conclusionMsg += `**Key Recommendations:**\n${result.recommendations.join('\n')}\n\n`;
+        }
+        
+        // Add comprehensive insights
+        if (result.insights) {
+          conclusionMsg += `📊 **Comprehensive Insights Generated!**\n\n`;
+          conclusionMsg += `The analysis has uncovered ${result.insights.dataQuality.length + result.insights.featureInsights.length + result.insights.correlationInsights.length + result.insights.distributionInsights.length} key findings across:\n`;
+          conclusionMsg += `• Data Quality (${result.insights.dataQuality.length} insights)\n`;
+          conclusionMsg += `• Feature Analysis (${result.insights.featureInsights.length} insights)\n`;
+          conclusionMsg += `• Correlations (${result.insights.correlationInsights.length} insights)\n`;
+          conclusionMsg += `• Distributions (${result.insights.distributionInsights.length} insights)\n`;
+          conclusionMsg += `• Actionable Recommendations (${result.insights.actionableRecommendations.length} items)\n\n`;
+        }
+        
+        conclusionMsg += `📊 View detailed insights in the right panel!\n\n`;
+        conclusionMsg += `💡 You can:\n• Ask "show insights" for detailed findings\n• Type "show code" for Python implementation\n• Ask specific questions about your data`;
+        
+        setMessages(prev => [...prev, { type: 'agent', content: conclusionMsg }]);
       }
-      
-      // Add comprehensive insights
-      if (result.insights) {
-        conclusionMsg += `📊 **Comprehensive Insights Generated!**\n\n`;
-        conclusionMsg += `The analysis has uncovered ${result.insights.dataQuality.length + result.insights.featureInsights.length + result.insights.correlationInsights.length + result.insights.distributionInsights.length} key findings across:\n`;
-        conclusionMsg += `• Data Quality (${result.insights.dataQuality.length} insights)\n`;
-        conclusionMsg += `• Feature Analysis (${result.insights.featureInsights.length} insights)\n`;
-        conclusionMsg += `• Correlations (${result.insights.correlationInsights.length} insights)\n`;
-        conclusionMsg += `• Distributions (${result.insights.distributionInsights.length} insights)\n`;
-        conclusionMsg += `• Actionable Recommendations (${result.insights.actionableRecommendations.length} items)\n\n`;
-      }
-      
-      conclusionMsg += `📊 View detailed insights in the right panel!\n\n`;
-      conclusionMsg += `💡 You can:\n• Ask "show insights" for detailed findings\n• Type "show code" for Python implementation\n• Ask specific questions about your data`;
-      
-      setMessages(prev => [...prev, { type: 'agent', content: conclusionMsg }]);
       return;
     }
 
@@ -671,95 +1036,41 @@ const ValidationAgenticAI = () => {
       return;
     }
 
-    // Handle data queries
+    // Handle data queries using API
     if (edaResults) {
-      let response = '';
-      
-      if (userMessage.toLowerCase().includes('insight') || userMessage.toLowerCase().includes('finding')) {
-        if (edaResults.insights) {
-          response = `🔍 **Comprehensive Insights:**\n\n`;
-          
-          if (edaResults.insights.dataQuality.length > 0) {
-            response += `**📊 Data Quality:**\n${edaResults.insights.dataQuality.map(i => `• ${i}`).join('\n')}\n\n`;
-          }
-          
-          if (edaResults.insights.featureInsights.length > 0) {
-            response += `**🔬 Feature Analysis:**\n${edaResults.insights.featureInsights.map(i => `• ${i}`).join('\n')}\n\n`;
-          }
-          
-          if (edaResults.insights.correlationInsights.length > 0) {
-            response += `**🔗 Correlation Insights:**\n${edaResults.insights.correlationInsights.map(i => `• ${i}`).join('\n')}\n\n`;
-          }
-          
-          if (edaResults.insights.distributionInsights.length > 0) {
-            response += `**📈 Distribution Analysis:**\n${edaResults.insights.distributionInsights.map(i => `• ${i}`).join('\n')}\n\n`;
-          }
-          
-          if (edaResults.insights.actionableRecommendations.length > 0) {
-            response += `**💡 Actionable Recommendations:**\n${edaResults.insights.actionableRecommendations.map(i => `${i}`).join('\n')}`;
-          }
-        } else {
-          response = 'Insights are being generated. Please wait for the analysis to complete.';
-        }
-      }
-      else if (userMessage.toLowerCase().includes('variance') || userMessage.toLowerCase().includes('iqr')) {
-        response = `📊 **Variance & IQR Analysis:**\n\n`;
-        Object.entries(edaResults.numericalSummary).slice(0, 5).forEach(([col, stats]) => {
-          response += `**${col}:**\n`;
-          response += `  • Variance: ${stats.variance}\n`;
-          response += `  • IQR: ${stats.iqr} (Q1: ${stats.q1}, Q3: ${stats.q3})\n`;
-          response += `  • Range: ${stats.range} (${stats.min} to ${stats.max})\n`;
-          response += `  • Outlier Bounds: [${stats.lowerBound}, ${stats.upperBound}]\n`;
-          response += `  • Coefficient of Variation: ${stats.coefficientOfVariation}%\n\n`;
+      try {
+        const response = await fetch('/validation/question', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            question: userMessage,
+            eda_results: edaResults
+          })
         });
-      }
-      else if (userMessage.toLowerCase().includes('unique') || userMessage.toLowerCase().includes('cardinality')) {
-        response = `🔢 **Unique Values Analysis:**\n\n`;
-        response += `**Numerical Features:**\n`;
-        Object.entries(edaResults.numericalSummary).forEach(([col, stats]) => {
-          const uniqueRatio = (stats.unique / stats.count * 100).toFixed(2);
-          response += `  • ${col}: ${stats.unique} unique values (${uniqueRatio}% of total)\n`;
-        });
-        response += `\n**Categorical Features:**\n`;
-        Object.entries(edaResults.objectSummary).forEach(([col, stats]) => {
-          response += `  • ${col}: ${stats.unique} unique values (${stats.uniquePercentage}% of total)\n`;
-        });
-      }
-      else if (userMessage.toLowerCase().includes('shape') || userMessage.toLowerCase().includes('size')) {
-        response = `📊 **Dataset Shape:**\n- Rows: ${edaResults.shape.rows}\n- Columns: ${edaResults.shape.columns}\n- Total cells: ${edaResults.shape.rows * edaResults.shape.columns}`;
-      } 
-      else if (userMessage.toLowerCase().includes('column') || userMessage.toLowerCase().includes('feature')) {
-        response = `📋 **Columns (${edaResults.columns.length}):**\n\n`;
-        response += `**Numerical (${edaResults.numericColumns.length}):** ${edaResults.numericColumns.join(', ') || 'None'}\n\n`;
-        response += `**Categorical (${edaResults.objectColumns.length}):** ${edaResults.objectColumns.join(', ') || 'None'}`;
-      } 
-      else if (userMessage.toLowerCase().includes('missing') || userMessage.toLowerCase().includes('null')) {
-        const hasMissing = Object.values(edaResults.missingValues).some(m => m.count > 0);
-        if (hasMissing) {
-          response = `⚠️ **Missing Values Detected:**\n\n`;
-          Object.entries(edaResults.missingValues)
-            .filter(([_, v]) => v.count > 0)
-            .forEach(([col, v]) => {
-              response += `• ${col}: ${v.count} (${v.percentage}%) - ${v.severity} severity\n`;
-            });
-        } else {
-          response = '✅ **No missing values found!** Your dataset is complete.';
-        }
-      } 
-      else if (userMessage.toLowerCase().includes('outlier')) {
-        const outlierCols = Object.entries(edaResults.numericalSummary)
-          .filter(([_, stats]) => stats.outliers > 0);
         
-        if (outlierCols.length > 0) {
-          response = `🔍 **Outliers Detected:**\n\n`;
-          outlierCols.forEach(([col, stats]) => {
-            response += `• ${col}: ${stats.outliers} outliers (${stats.outliersPercentage}%)\n`;
-          });
+        if (response.ok) {
+          const result = await response.json();
+          setMessages(prev => [...prev, { 
+            type: 'agent', 
+            content: result.answer 
+          }]);
         } else {
-          response = '✅ No significant outliers detected using IQR method.';
+          setMessages(prev => [...prev, { 
+            type: 'agent', 
+            content: '❌ Sorry, I couldn\'t process your question. Please try rephrasing.' 
+          }]);
         }
+      } catch (error) {
+        console.error('Question API call failed:', error);
+        setMessages(prev => [...prev, { 
+          type: 'agent', 
+          content: '❌ Error connecting to analysis service. Please try again.' 
+        }]);
       }
-      else if (userMessage.toLowerCase().includes('correlation')) {
+      return;
+    }
         if (edaResults.numericColumns.length > 1) {
           const strongCorr = [];
           Object.entries(edaResults.correlation).forEach(([col1, correlations]) => {
@@ -911,90 +1222,179 @@ if numerical_cols:
     
     # Additional statistics including variance, IQR, and unique values
     print("\\nAdvanced Statistics (Variance, IQR, Unique Values):")
-    for col in numerical_cols:
-        print(f"\\n{col}:")
-        print(f"  Mean: {df[col].mean():.2f}")
-        print(f"  Median: {df[col].median():.2f}")
-        print(f"  Std Dev: {df[col].std():.2f}")
-        print(f"  Variance: {df[col].var():.2f}")
-        
-        # Quartiles and IQR
-        Q1 = df[col].quantile(0.25)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
-        print(f"  Q1 (25th percentile): {Q1:.2f}")
-        print(f"  Q3 (75th percentile): {Q3:.2f}")
-        print(f"  IQR (Interquartile Range): {IQR:.2f}")
-        print(f"  Lower Bound (Q1 - 1.5*IQR): {(Q1 - 1.5*IQR):.2f}")
-        print(f"  Upper Bound (Q3 + 1.5*IQR): {(Q3 + 1.5*IQR):.2f}")
-        
-        # Range
-        data_range = df[col].max() - df[col].min()
-        print(f"  Range: {data_range:.2f}")
-        
-        # Unique values
-        unique_count = df[col].nunique()
-        unique_ratio = (unique_count / len(df)) * 100
-        print(f"  Unique Values: {unique_count} ({unique_ratio:.2f}% of total)")
-        
-        # Skewness and Kurtosis
-        print(f"  Skewness: {df[col].skew():.2f}")
-        print(f"  Kurtosis: {df[col].kurtosis():.2f}")
-        
-        # Coefficient of Variation
-        cv = (df[col].std() / df[col].mean()) * 100 if df[col].mean() != 0 else 0
-        print(f"  Coefficient of Variation: {cv:.2f}%")
+  return (
+    <div className="flex h-screen bg-gray-50">
+      {/* Chat Panel */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 p-4">
+          <h1 className="text-2xl font-bold text-gray-800 flex items-center">
+            <Brain className="mr-2 text-blue-600" />
+            Validation Agentic AI
+          </h1>
+          <p className="text-gray-600 mt-1">Advanced dataset validation and EDA with AI-powered insights</p>
+        </div>
 
-# Categorical columns summary
-categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
-if categorical_cols:
-    print(f"\\nCategorical Columns ({len(categorical_cols)}):")
-    for col in categorical_cols:
-        print(f"\\n{col}:")
-        print(f"  Unique values: {df[col].nunique()}")
-        print(f"  Most common value: {df[col].mode()[0]}")
-        print(f"\\n  Top 5 values:")
-        print(df[col].value_counts().head())
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map((message, index) => (
+            <div key={index} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-3xl rounded-lg p-3 ${
+                message.type === 'user' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-white border border-gray-200 text-gray-800'
+              }`}>
+                <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
+              </div>
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
 
-# ============================================
-# STEP 5: OUTLIER DETECTION
-# ============================================
+        {/* Input */}
+        <div className="bg-white border-t border-gray-200 p-4">
+          <div className="flex space-x-2">
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              ref={fileInputRef}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              <Upload className="mr-2" size={16} />
+              Upload CSV
+            </button>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+              placeholder="Ask questions about your data..."
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isProcessing}
+            />
+            <button
+              onClick={handleSendMessage}
+              disabled={isProcessing || !input.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+            </button>
+          </div>
+        </div>
+      </div>
 
-print("\\n" + "="*50)
-print("OUTLIER DETECTION (IQR Method)")
-print("="*50)
+      {/* Results Panel */}
+      <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto">
+        {edaResults ? (
+          <div className="p-4">
+            <h2 className="text-lg font-semibold mb-4 flex items-center">
+              <BarChart3 className="mr-2 text-green-600" />
+              Analysis Results
+            </h2>
 
-outlier_summary = []
+            {/* Dataset Overview */}
+            <div className="mb-6">
+              <h3 className="font-medium mb-2">📊 Dataset Overview</h3>
+              <div className="bg-gray-50 p-3 rounded">
+                <p><strong>Shape:</strong> {edaResults.shape.rows} rows × {edaResults.shape.columns} columns</p>
+                <p><strong>Size:</strong> {edaResults.size} cells</p>
+                <p><strong>Validation:</strong> {edaResults.isValid ? 
+                  <span className="text-green-600">✅ Passed</span> : 
+                  <span className="text-red-600">⚠️ Issues</span>
+                }</p>
+              </div>
+            </div>
 
-for col in numerical_cols:
-    Q1 = df[col].quantile(0.25)
-    Q3 = df[col].quantile(0.75)
-    IQR = Q3 - Q1
-    
-    # Define outlier bounds
-    lower_bound = Q1 - 1.5 * IQR
-    upper_bound = Q3 + 1.5 * IQR
-    
-    # Count outliers
-    outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
-    outlier_count = len(outliers)
-    outlier_pct = (outlier_count / len(df)) * 100
-    
-    if outlier_count > 0) {
-        outlier_summary.append({
-            'Column': col,
-            'Outliers': outlier_count,
-            'Percentage': f"{outlier_pct:.2f}%",
-            'Lower_Bound': f"{lower_bound:.2f}",
-            'Upper_Bound': f"{upper_bound:.2f}"
-        });
-    }
+            {/* Numerical Summary */}
+            {Object.keys(edaResults.numericalSummary).length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium mb-2">🔢 Numerical Features</h3>
+                <div className="space-y-2">
+                  {Object.entries(edaResults.numericalSummary).slice(0, 3).map(([col, stats]) => (
+                    <div key={col} className="bg-gray-50 p-3 rounded">
+                      <p className="font-medium">{col}</p>
+                      <div className="text-sm text-gray-600 grid grid-cols-2 gap-1">
+                        <span>Mean: {stats.mean}</span>
+                        <span>Median: {stats.median}</span>
+                        <span>Mode: {stats.mode || 'N/A'}</span>
+                        <span>Std: {stats.std}</span>
+                        <span>IQR: {stats.iqr}</span>
+                        <span>Skew: {stats.skewness}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-if (outlier_summary.length > 0) {
-    console.log("\\nOutliers detected:");
-    // Note: original code is Python - please run server-side for Python outputs
-} else {
-    console.log("\\n✅ No significant outliers detected!");
-}
+            {/* Categorical Summary */}
+            {Object.keys(edaResults.objectSummary).length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium mb-2">📋 Categorical Features</h3>
+                <div className="space-y-2">
+                  {Object.entries(edaResults.objectSummary).slice(0, 3).map(([col, stats]) => (
+                    <div key={col} className="bg-gray-50 p-3 rounded">
+                      <p className="font-medium">{col}</p>
+                      <p className="text-sm text-gray-600">
+                        {stats.unique} unique values
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Insights */}
+            {edaResults.insights && (
+              <div className="mb-6">
+                <h3 className="font-medium mb-2">💡 Key Insights</h3>
+                <div className="space-y-2">
+                  {edaResults.insights.dataQuality.slice(0, 2).map((insight, i) => (
+                    <p key={i} className="text-sm bg-blue-50 p-2 rounded">{insight}</p>
+                  ))}
+                  {edaResults.insights.featureInsights.slice(0, 2).map((insight, i) => (
+                    <p key={i} className="text-sm bg-green-50 p-2 rounded">{insight}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recommendations */}
+            {edaResults.recommendations && edaResults.recommendations.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-medium mb-2">🎯 Recommendations</h3>
+                <div className="space-y-1">
+                  {edaResults.recommendations.slice(0, 3).map((rec, i) => (
+                    <p key={i} className="text-sm bg-yellow-50 p-2 rounded">{rec}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : showCode ? (
+          <div className="p-4">
+            <h2 className="text-lg font-semibold mb-4 flex items-center">
+              <Code className="mr-2 text-purple-600" />
+              Python Implementation
+            </h2>
+            <pre className="text-xs bg-gray-900 text-green-400 p-3 rounded overflow-x-auto">
+              {getPythonCode()}
+            </pre>
+          </div>
+        ) : (
+          <div className="p-4 text-center text-gray-500">
+            <FileText className="mx-auto mb-2" size={48} />
+            <p>Upload a CSV file and start analyzing!</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export default ValidationAgenticAI;
