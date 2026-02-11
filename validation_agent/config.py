@@ -188,6 +188,7 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
         return {"error": "Dataset is empty", "isValid": False}
 
     shape = {"rows": int(df.shape[0]), "columns": int(df.shape[1])}
+    size = shape['rows'] * shape['columns']
 
     # Enhanced column type detection
     column_types = {}
@@ -251,6 +252,10 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
         std = float(series.std())
         mean = float(series.mean())
         
+        # Calculate mode (handling multiple modes)
+        mode_series = series.mode()
+        mode = float(mode_series.iloc[0]) if len(mode_series) > 0 else None
+        
         # Statistical tests
         normality_p = stats.normaltest(series)[1] if len(series) > 8 else 1.0
         is_normal = normality_p > 0.05
@@ -278,6 +283,7 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
             "unique": int(series.nunique()),
             "mean": round(mean, 4),
             "median": round(float(series.median()), 4),
+            "mode": round(mode, 4) if mode is not None else None,
             "std": round(std, 4),
             "variance": round(variance, 4),
             "min": round(float(series.min()), 4),
@@ -467,6 +473,7 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
 
     result = {
         'shape': shape,
+        'size': size,
         'columns': list(df.columns),
         'columnTypes': column_types,
         'numericColumns': numeric_cols,

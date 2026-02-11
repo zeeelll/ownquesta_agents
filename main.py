@@ -73,11 +73,32 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
     logger.info(f"Successfully loaded router: {module_path}.{attr}")
     return router
 
-# Agent registry and controlled loading
-AGENT_REGISTRY = {
-    "conversation": {"module": "conversation_agent.endpoint", "attr": "router", "prefix": "/conversation", "name": "Conversation Agent"},
-    "validation": {"module": "validation_agent.endpoint", "attr": "router", "prefix": "/validation", "name": "Validation Agent"},
-}
+# Agent registry and controlled loading - dynamically discovered
+from pathlib import Path
+
+def discover_agents():
+    """Dynamically discover available agents in the agents directory."""
+    agents_dir = Path(__file__).parent
+    agent_registry = {}
+    
+    for item in agents_dir.iterdir():
+        if item.is_dir() and not item.name.startswith('.') and item.name not in ['__pycache__', 'data', 'scripts']:
+            endpoint_file = item / 'endpoint.py'
+            if endpoint_file.exists():
+                key = item.name
+                # Use the part before '_agent' if present, else the name
+                prefix_name = item.name.replace('_agent', '') if '_agent' in item.name else item.name
+                agent_registry[key] = {
+                    "module": f"{item.name}.endpoint",
+                    "attr": "router",
+                    "prefix": f"/{prefix_name}",
+                    "name": f"{prefix_name.replace('_', ' ').title()} Agent"
+                }
+                logger.info(f"Discovered agent: {key} at {item.name}")
+    
+    return agent_registry
+
+AGENT_REGISTRY = discover_agents()
 
 # Read ENABLED_AGENTS from environment (comma-separated keys from AGENT_REGISTRY)
 enabled_env = os.getenv("ENABLED_AGENTS")
@@ -104,7 +125,7 @@ validation_router = agent_routers.get("validation")
 # Create main FastAPI application
 app = FastAPI(
     title="OwnQuesta Agent API",
-    description="AI-powered machine learning platform APIs including ML validation, conversation agents, and comprehensive ML assistance",
+    description="AI-powered machine learning platform APIs including advanced ML validation with comprehensive EDA (shape, size, statistical summaries, data distribution, correlations, insights), conversation agents, and comprehensive ML assistance",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -142,9 +163,9 @@ def health():
     """Comprehensive health check for all agents"""
     agent_status = {}
     
-    # Check other agents
-    agent_status["conversation"] = "available" if conversation_router else "unavailable"
-    agent_status["validation"] = "available" if validation_router else "unavailable"
+    # Check all discovered agents
+    for key, router in agent_routers.items():
+        agent_status[key] = "available" if router else "unavailable"
     
     overall_status = "ok" if any(status == "available" for status in agent_status.values()) else "degraded"
 
@@ -160,21 +181,13 @@ def get_available_agents() -> List[Dict[str, Any]]:
     """Get list of available agent endpoints"""
     agents: List[Dict[str, Any]] = []
     
-    
-    
-    if conversation_router:
-        agents.append({
-            "name": "Conversation Agent",
-            "prefix": "/conversation",
-            "description": "AI-powered conversational assistant with RAG capabilities"
-        })
-    if validation_router:
-        agents.append({
-            "name": "Validation Agent",
-            "prefix": "/validation",
-            "description": "Dataset validation and EDA agent for ML workflows"
-        })
-    
+    for key, meta in AGENT_REGISTRY.items():
+        if key in enabled_keys and agent_routers.get(key):
+            agents.append({
+                "name": meta["name"],
+                "prefix": meta["prefix"],
+                "description": f"AI-powered {meta['name'].lower()} for advanced ML workflows"
+            })
     
     return agents
 
@@ -185,8 +198,9 @@ def meta():
     endpoints = ["/", "/health", "/meta.json"]
     
     # Add available agent endpoints
-    if conversation_router:
-        endpoints.append("/conversation")
+    for key, router in agent_routers.items():
+        if router:
+            endpoints.append(AGENT_REGISTRY[key]["prefix"])
     
     return {
         "name": "ownquesta-agent-api",
@@ -199,32 +213,21 @@ def meta():
 
 # Include routers for available agents (safe registration)
 logger.info("Registering available agent routers...")
-if conversation_router is not None:
-    try:
-        app.include_router(
-            conversation_router,
-            prefix="/conversation",
-            tags=["Conversation Agent"],
-        )
-        logger.info("Conversation Agent registered at /conversation")
-    except Exception as e:
-        logger.exception("Failed to register Conversation router: %s", e)
-if validation_router is not None:
-    try:
-        app.include_router(
-            validation_router,
-            prefix="/validation",
-            tags=["Validation Agent"],
-        )
-        logger.info("Validation Agent registered at /validation")
-    except Exception as e:
-        logger.exception("Failed to register Validation router: %s", e)
+for key, router in agent_routers.items():
+    if router is not None:
+        try:
+            meta = AGENT_REGISTRY[key]
+            app.include_router(
+                router,
+                prefix=meta["prefix"],
+                tags=[meta["name"]],
+            )
+            logger.info(f"{meta['name']} registered at {meta['prefix']}")
+        except Exception as e:
+            logger.exception(f"Failed to register {key} router: %s", e)
 
 # Log startup summary
-total_agents = sum([ 
-    conversation_router is not None,
-    validation_router is not None,
-])
+total_agents = sum(router is not None for router in agent_routers.values())
 
 # Add startup event
 @app.on_event("startup")
