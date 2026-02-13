@@ -14,6 +14,7 @@ const ValidationAgenticAI = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [questions, setQuestions] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
+  const [mlValidationResult, setMlValidationResult] = useState(null);
   const fileInputRef = useRef(null);
 
   const detectGoal = (userInput) => {
@@ -100,7 +101,7 @@ const ValidationAgenticAI = () => {
 
     try {
       // Call ML validation endpoint which includes EDA
-      const response = await fetch('/validation/ml_validate', {
+      const response = await fetch('/ml-validation/validate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -119,7 +120,13 @@ const ValidationAgenticAI = () => {
 
       if (result.status === 'success') {
         setEdaResults(result.eda_result);
-        setMlResults(result.ml_result);
+        if (result.ml_result) {
+          setMlResults(result.ml_result);
+          setMlValidationResult(result.ml_result);
+        } else {
+          setMlResults(result);
+          setMlValidationResult(result);
+        }
         setCurrentStep('results');
       } else {
         throw new Error('Analysis failed');
@@ -133,7 +140,100 @@ const ValidationAgenticAI = () => {
     }
   };
 
-  const askQuestion = async () => {
+  const generateCode = () => {
+    if (!edaResults) return 'No EDA results available';
+    
+    return `# Generated EDA and ML Pipeline Code
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.metrics import classification_report, confusion_matrix, mean_squared_error, r2_score
+
+# Load your dataset
+df = pd.read_csv('your_dataset.csv')
+print(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+
+# EXPLORATORY DATA ANALYSIS
+print("\n=== DATASET OVERVIEW ===")
+print("Dataset Shape:", df.shape)
+print("\nColumn Types:")
+print(df.dtypes)
+
+print("\n=== MISSING VALUES ===")
+missing_values = df.isnull().sum()
+print(missing_values[missing_values > 0])
+
+print("\n=== STATISTICAL SUMMARY ===")
+print(df.describe())
+
+# VISUALIZATION SECTION
+fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+fig.suptitle('Dataset Overview', fontsize=16)
+
+# Missing values heatmap
+if df.isnull().sum().sum() > 0:
+    axes[0,0].title.set_text('Missing Values Heatmap')
+    sns.heatmap(df.isnull(), cbar=True, ax=axes[0,0])
+else:
+    axes[0,0].text(0.5, 0.5, 'No Missing Values', ha='center', va='center')
+    axes[0,0].set_title('Missing Values Check')
+
+# Correlation matrix
+numerical_cols = df.select_dtypes(include=[np.number]).columns
+if len(numerical_cols) > 1:
+    corr_matrix = df[numerical_cols].corr()
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+    sns.heatmap(corr_matrix, mask=mask, annot=True, cmap='coolwarm', center=0, ax=axes[0,1])
+    axes[0,1].set_title('Feature Correlation Matrix')
+else:
+    axes[0,1].text(0.5, 0.5, 'Insufficient numerical features', ha='center', va='center')
+
+# Data types distribution
+data_types = df.dtypes.astype(str).value_counts()
+axes[1,0].pie(data_types.values, labels=data_types.index, autopct='%1.1f%%')
+axes[1,0].set_title('Data Types Distribution')
+
+# Dataset size breakdown
+axes[1,1].bar(['Rows', 'Columns', 'Numeric', 'Categorical'], 
+              [df.shape[0], df.shape[1], len(numerical_cols), len(df.select_dtypes(include=['object']).columns)])
+axes[1,1].set_title('Dataset Composition')
+
+plt.tight_layout()
+plt.show()
+
+# FEATURE ANALYSIS
+print("\n=== FEATURE ANALYSIS ===")
+
+# Numerical features
+if len(numerical_cols) > 0:
+    print(f"\nNumerical features ({len(numerical_cols)}): {list(numerical_cols)}")
+    for col in numerical_cols:
+        print(f"\n{col}:")
+        print(f"  Mean: {df[col].mean():.2f}")
+        print(f"  Median: {df[col].median():.2f}")
+        print(f"  Std: {df[col].std():.2f}")
+        print(f"  Skewness: {df[col].skew():.2f}")
+        print(f"  Missing: {df[col].isnull().sum()} ({df[col].isnull().sum()/len(df)*100:.1f}%)")
+
+# Categorical features
+categorical_cols = df.select_dtypes(include=['object']).columns
+if len(categorical_cols) > 0:
+    print(f"\nCategorical features ({len(categorical_cols)}): {list(categorical_cols)}")
+    for col in categorical_cols:
+        unique_count = df[col].nunique()
+        print(f"\n{col}: {unique_count} unique values")
+        if unique_count <= 10:
+            print(f"  Values: {df[col].value_counts().head().to_dict()}")
+        print(f"  Missing: {df[col].isnull().sum()} ({df[col].isnull().sum()/len(df)*100:.1f}%)")
+
+print("\n=== ANALYSIS COMPLETE ===")
+print("Next steps: Choose target variable and run ML models")
+`;
+  };
     if (!currentQuestion.trim() || !edaResults) return;
 
     const question = currentQuestion.trim();
@@ -194,11 +294,11 @@ const ValidationAgenticAI = () => {
               <div className="text-sm text-gray-600">Columns</div>
             </div>
             <div className="text-center p-4 bg-purple-50 rounded">
-              <div className="text-2xl font-bold text-purple-600">{edaResults.numericColumns.length}</div>
+              <div className="text-2xl font-bold text-purple-600">{edaResults.numericColumns?.length || 0}</div>
               <div className="text-sm text-gray-600">Numeric</div>
             </div>
             <div className="text-center p-4 bg-orange-50 rounded">
-              <div className="text-2xl font-bold text-orange-600">{edaResults.objectColumns.length}</div>
+              <div className="text-2xl font-bold text-orange-600">{edaResults.objectColumns?.length || 0}</div>
               <div className="text-sm text-gray-600">Categorical</div>
             </div>
           </div>
@@ -225,13 +325,76 @@ const ValidationAgenticAI = () => {
             Data Quality Assessment
           </h3>
           <div className="space-y-3">
-            {edaResults.insights?.dataQuality.map((insight, index) => (
-              <div key={index} className="p-3 bg-gray-50 rounded text-sm">
+            {edaResults.insights?.dataQuality?.map((insight, index) => (
+              <div key={index} className="p-3 bg-gray-50 rounded text-sm border-l-4 border-blue-400">
                 {insight}
               </div>
-            ))}
+            )) || (
+              <div className="p-3 bg-gray-50 rounded text-sm">
+                Data quality assessment completed. Check the detailed analysis for more insights.
+              </div>
+            )}
           </div>
         </div>
+
+        {/* ML Validation Results */}
+        {(mlValidationResult || mlResults) && (
+          <div className="space-y-4">
+            {/* Goal Understanding */}
+            {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding) && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-lg font-semibold mb-4 text-purple-900">🎯 Goal Analysis</h3>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Task Type:</p>
+                    <p className="font-medium text-gray-800 capitalize text-lg">
+                      {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.interpreted_task}
+                    </p>
+                  </div>
+                  
+                  {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.target_column_guess && (
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Suggested Target:</p>
+                      <p className="font-medium text-purple-700 text-lg">
+                        {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.target_column_guess}
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Confidence:</p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-gray-200 rounded-full h-3">
+                        <div 
+                          className="bg-purple-600 h-3 rounded-full transition-all duration-300"
+                          style={{width: `${((mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.confidence || 0) * 100}%`}}
+                        ></div>
+                      </div>
+                      <span className="text-sm font-medium">
+                        {(((mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.confidence || 0) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Recommendations */}
+            {(mlValidationResult?.optional_questions || mlResults?.optional_questions) && (mlValidationResult?.optional_questions || mlResults?.optional_questions).length > 0 && (
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-lg font-semibold mb-4 text-teal-900">💡 Recommendations</h3>
+                <ul className="space-y-2">
+                  {(mlValidationResult?.optional_questions || mlResults?.optional_questions).map((question, idx) => (
+                    <li key={idx} className="flex items-start gap-3 bg-teal-50 p-3 rounded">
+                      <span className="text-teal-600 font-bold text-lg">•</span>
+                      <span className="text-gray-800">{question}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -451,46 +614,120 @@ const ValidationAgenticAI = () => {
   };
 
   const renderCode = () => {
-    if (!mlResults || !mlResults.implementationCode) return null;
-
     return (
       <div className="space-y-6">
         <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center">
-            <Code className="w-5 h-5 mr-2 text-blue-600" />
-            EDA Code
-          </h3>
-          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
-            {mlResults.implementationCode.eda_code}
-          </pre>
-        </div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold flex items-center">
+              <Code className="w-5 h-5 mr-2 text-blue-600" />
+              Generated Python Code
+            </h3>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowCode(!showCode)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                {showCode ? 'Hide Code' : 'Show Code'}
+              </button>
+              <button
+                onClick={() => {
+                  const code = (mlResults?.implementationCode?.full_pipeline || generateCode());
+                  navigator.clipboard.writeText(code);
+                  alert('Code copied to clipboard!');
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Copy Code
+              </button>
+            </div>
+          </div>
+          
+          {showCode && (
+            <div className="space-y-4">
+              <div className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                <h4 className="text-green-400 mb-3 font-semibold"># Complete EDA & ML Pipeline</h4>
+                <pre className="text-sm leading-relaxed">
+                  {mlResults?.implementationCode?.full_pipeline || generateCode()}
+                </pre>
+              </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">Preprocessing Code</h3>
-          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
-            {mlResults.implementationCode.preprocessing_code}
-          </pre>
-        </div>
+              {/* Code Sections */}
+              {mlResults?.implementationCode && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {mlResults.implementationCode.eda_code && (
+                    <div>
+                      <h4 className="font-medium text-gray-800 mb-2">📊 EDA Code</h4>
+                      <pre className="bg-gray-800 text-green-300 p-3 rounded text-xs overflow-x-auto max-h-40">
+                        {mlResults.implementationCode.eda_code}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {mlResults.implementationCode.preprocessing_code && (
+                    <div>
+                      <h4 className="font-medium text-gray-800 mb-2">🔧 Preprocessing Code</h4>
+                      <pre className="bg-gray-800 text-blue-300 p-3 rounded text-xs overflow-x-auto max-h-40">
+                        {mlResults.implementationCode.preprocessing_code}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {mlResults.implementationCode.model_code && (
+                    <div>
+                      <h4 className="font-medium text-gray-800 mb-2">🤖 Model Code</h4>
+                      <pre className="bg-gray-800 text-purple-300 p-3 rounded text-xs overflow-x-auto max-h-40">
+                        {mlResults.implementationCode.model_code}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {mlResults.implementationCode.validation_code && (
+                    <div>
+                      <h4 className="font-medium text-gray-800 mb-2">✅ Validation Code</h4>
+                      <pre className="bg-gray-800 text-yellow-300 p-3 rounded text-xs overflow-x-auto max-h-40">
+                        {mlResults.implementationCode.validation_code}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">Model Training Code</h3>
-          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
-            {mlResults.implementationCode.model_code}
-          </pre>
-        </div>
+          {/* Key Insights */}
+          <div className="space-y-3 mt-6">
+            <h4 className="font-semibold text-gray-800">📋 Key Implementation Notes:</h4>
+            <div className="space-y-2">
+              <div className="p-3 bg-blue-50 rounded border-l-4 border-blue-400 text-sm">
+                <strong>Dataset:</strong> {edaResults?.shape?.rows || 'N/A'} rows × {edaResults?.shape?.columns || 'N/A'} columns
+              </div>
+              <div className="p-3 bg-green-50 rounded border-l-4 border-green-400 text-sm">
+                <strong>Features:</strong> {edaResults?.numericColumns?.length || 0} numerical, {edaResults?.objectColumns?.length || 0} categorical
+              </div>
+              {mlValidationResult?.status === 'PROCEED' && (
+                <div className="p-3 bg-green-50 rounded border-l-4 border-green-400 text-sm">
+                  <strong>✅ Ready for ML:</strong> Dataset quality score {mlValidationResult.satisfaction_score}/100
+                </div>
+              )}
+              {mlValidationResult?.goal_understanding?.target_column_guess && (
+                <div className="p-3 bg-purple-50 rounded border-l-4 border-purple-400 text-sm">
+                  <strong>Target Variable:</strong> {mlValidationResult.goal_understanding.target_column_guess}
+                </div>
+              )}
+            </div>
+          </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">Validation Code</h3>
-          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
-            {mlResults.implementationCode.validation_code}
-          </pre>
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">Complete Pipeline</h3>
-          <pre className="bg-gray-900 text-green-400 p-4 rounded text-sm overflow-x-auto">
-            {mlResults.implementationCode.full_pipeline}
-          </pre>
+          {/* AI Insights */}
+          {edaResults?.aiInsights && (
+            <div className="mt-4">
+              <h4 className="font-semibold text-gray-800 mb-2">🧠 AI-Generated Insights:</h4>
+              <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded border border-purple-200">
+                <div className="text-gray-700 whitespace-pre-wrap text-sm">
+                  {edaResults.aiInsights}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -616,19 +853,79 @@ const ValidationAgenticAI = () => {
 
         {currentStep === 'results' && (
           <div className="space-y-6">
+            {/* Status Summary */}
+            {(mlValidationResult || mlResults) && (
+              <div className={`rounded-lg shadow-lg p-6 border-l-4 ${
+                mlValidationResult?.status === 'PROCEED' ? 'bg-green-50 border-green-500' :
+                mlValidationResult?.status === 'PAUSE' ? 'bg-yellow-50 border-yellow-500' :
+                'bg-blue-50 border-blue-500'
+              }`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${
+                    mlValidationResult?.status === 'PROCEED' ? 'bg-green-100 text-green-700' :
+                    mlValidationResult?.status === 'PAUSE' ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {mlValidationResult?.status === 'PROCEED' ? '✅' : 
+                     mlValidationResult?.status === 'PAUSE' ? '⚠️' : '📊'}
+                  </div>
+                  <div>
+                    <h3 className={`text-2xl font-bold ${
+                      mlValidationResult?.status === 'PROCEED' ? 'text-green-800' :
+                      mlValidationResult?.status === 'PAUSE' ? 'text-yellow-800' :
+                      'text-blue-800'
+                    }`}>
+                      {mlValidationResult?.status === 'PROCEED' ? 'Ready to Proceed!' :
+                       mlValidationResult?.status === 'PAUSE' ? 'Needs Attention' :
+                       'Analysis Complete'}
+                    </h3>
+                    <p className="text-lg font-medium text-gray-600">
+                      Quality Score: {mlValidationResult?.satisfaction_score || mlResults?.satisfaction_score || 'N/A'}/100
+                    </p>
+                  </div>
+                </div>
+
+                {/* Detected Goal */}
+                {detectedGoal && (
+                  <div className="bg-white p-4 rounded-lg border border-gray-200 mb-4">
+                    <h4 className="font-semibold text-gray-800 mb-2">🎯 Detected Goal: {detectedGoal.description}</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                      {detectedGoal.focus.map((item, index) => (
+                        <div key={index} className="flex items-center">
+                          <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Agent Answer */}
+                {(mlValidationResult?.agent_answer || mlResults?.agent_answer) && (
+                  <div className="bg-white p-4 rounded-lg border border-gray-200">
+                    <h4 className="font-semibold text-gray-800 mb-2">🤖 AI Agent Analysis:</h4>
+                    <div className="prose prose-sm max-w-none">
+                      <div className="whitespace-pre-wrap text-gray-700">
+                        {mlValidationResult?.agent_answer || mlResults?.agent_answer}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="bg-white rounded-lg shadow p-4">
               <div className="flex space-x-1 mb-4">
                 {[
                   { id: 'overview', label: 'Overview', icon: Database },
-                  { id: 'eda', label: 'EDA Results', icon: BarChart3 },
-                  { id: 'ml', label: 'ML Validation', icon: Brain },
-                  { id: 'code', label: 'Python Code', icon: Code },
+                  { id: 'eda', label: 'Detailed Analysis', icon: BarChart3 },
+                  { id: 'code', label: 'Code & Insights', icon: Code },
                   { id: 'questions', label: 'Ask Questions', icon: MessageSquare }
                 ].map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center px-4 py-2 rounded ${
+                    className={`flex items-center px-4 py-2 rounded transition-colors ${
                       activeTab === tab.id
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
@@ -643,7 +940,6 @@ const ValidationAgenticAI = () => {
               <div className="min-h-96">
                 {activeTab === 'overview' && renderOverview()}
                 {activeTab === 'eda' && renderEDA()}
-                {activeTab === 'ml' && renderMLValidation()}
                 {activeTab === 'code' && renderCode()}
                 {activeTab === 'questions' && renderQuestions()}
               </div>
