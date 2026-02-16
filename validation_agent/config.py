@@ -18,6 +18,42 @@ from pathlib import Path
 from dotenv import load_dotenv
 import logging
 
+
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively convert numpy/pandas types to native Python types for JSON serialization."""
+    # numpy scalar -> python native
+    try:
+        if isinstance(obj, (np.generic,)):
+            return obj.item()
+    except Exception:
+        pass
+
+    # numpy arrays -> lists
+    try:
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except Exception:
+        pass
+
+    # pandas Series/DataFrame -> lists/dicts
+    try:
+        if isinstance(obj, pd.Series):
+            return _sanitize_for_json(obj.tolist())
+        if isinstance(obj, pd.DataFrame):
+            return _sanitize_for_json(obj.to_dict(orient='records'))
+    except Exception:
+        pass
+
+    # dict -> sanitize values
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+
+    # list/tuple -> sanitize elements
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+
+    return obj
+
 # Load environment variables from project root
 project_root = Path(__file__).parent.parent
 env_path = project_root / ".env"
@@ -330,7 +366,7 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
         return {"error": f"Failed to parse CSV: {str(e)}", "isValid": False}
 
     if df.empty:
-        return {"error": "Dataset is empty", "isValid": False}
+        return _sanitize_for_json({"error": "Dataset is empty", "isValid": False})
 
     shape = {"rows": int(df.shape[0]), "columns": int(df.shape[1])}
     size = shape['rows'] * shape['columns']
@@ -636,10 +672,56 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
         'insights': insights
     }
 
+    # Derive a user-friendly satisfaction score and simple goal-understanding hints
+    try:
+        satisfaction = int(validation_checks.get('readinessScore', 0))
+    except Exception:
+        satisfaction = 0
+
+    # Simple target/goal detection heuristics
+    target_guess = None
+    lower_cols = [c.lower() for c in df.columns]
+    for keyword in ('target', 'label', 'y', 'outcome', 'class'):
+        if keyword in lower_cols:
+            idx = lower_cols.index(keyword)
+            target_guess = df.columns[idx]
+            break
+
+    interpreted_task = 'Auto-detected'
+    confidence = 0.0
+    if goal and goal.get('type'):
+        if goal.get('type') == 'supervised':
+            interpreted_task = 'Predictive (supervised)'
+        elif goal.get('type') == 'unsupervised':
+            interpreted_task = 'Unsupervised (clustering)'
+        confidence = 0.9
+    else:
+        # Heuristic: if a target-like column exists -> supervised
+        if target_guess:
+            interpreted_task = 'Predictive (supervised)'
+            confidence = 0.9
+        elif len(object_cols) > 0 and len(numeric_cols) > 0:
+            interpreted_task = 'Predictive (supervised)'
+            confidence = 0.6
+        elif len(numeric_cols) > 1:
+            interpreted_task = 'Predictive (supervised)'
+            confidence = 0.5
+        else:
+            interpreted_task = 'Exploratory / Unsupervised'
+            confidence = 0.4
+
+    result['satisfaction_score'] = satisfaction
+    result['goal_understanding'] = {
+        'interpreted_task': interpreted_task,
+        'target_column_guess': target_guess or 'To be determined',
+        'confidence': float(confidence)
+    }
+
     # Add AI-powered insights after result is created
     # result['aiInsights'] = generate_ai_insights(result)  # Disabled for testing
 
-    return result
+    # Sanitize result to ensure JSON serializable types
+    return _sanitize_for_json(result)
 
 
 def perform_ml_validation_from_eda(eda_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -822,13 +904,14 @@ def perform_ml_validation_from_eda(eda_results: Dict[str, Any]) -> Dict[str, Any
         # Add AI-powered insights for ML validation
         ml_validation['aiInsights'] = generate_ml_ai_insights(eda_results, ml_validation)
 
-        return ml_validation
+        # Ensure returned structure is JSON-serializable
+        return _sanitize_for_json(ml_validation)
 
     except Exception as e:
-        return {
+        return _sanitize_for_json({
             'error': f'ML validation failed: {str(e)}',
             'isValid': False
-        }
+        })
 
 
 def generate_ml_implementation_code(eda_results: Dict[str, Any]) -> Dict[str, Any]:
