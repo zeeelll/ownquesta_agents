@@ -7,10 +7,32 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+import os
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
+
+# Expose a few optional runtime settings via environment variables
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_MAX_TOKENS = os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS')
+OPENAI_TEMPERATURE = os.getenv('OPENAI_TEMPERATURE') or os.getenv('TEMPERATURE')
+
+# Configure allowed frontend origins for CORS via env `FRONTEND_ORIGINS` (comma-separated)
+_default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000"
+]
+frontend_origins_env = os.getenv('FRONTEND_ORIGINS')
+if frontend_origins_env:
+    try:
+        origins = [o.strip() for o in frontend_origins_env.split(',') if o.strip()]
+    except Exception:
+        origins = _default_origins
+else:
+    origins = _default_origins
 
 # Configure logging
 logging.basicConfig(
@@ -18,6 +40,13 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("ownquesta_agents")
+
+def _is_number(value: str) -> bool:
+    try:
+        float(value)
+        return True
+    except Exception:
+        return False
 
 def try_import_router(module_path: str, attr: str = "router") -> Optional[object]:
     """
@@ -136,12 +165,7 @@ app = FastAPI(
 # Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000"
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -164,18 +188,38 @@ def root():
 def health():
     """Comprehensive health check for all agents"""
     agent_status = {}
-    
+
     # Check all discovered agents
     for key, router in agent_routers.items():
         agent_status[key] = "available" if router else "unavailable"
-    
+
     overall_status = "ok" if any(status == "available" for status in agent_status.values()) else "degraded"
+
+    openai_max_tokens_val = None
+    if OPENAI_MAX_TOKENS:
+        try:
+            openai_max_tokens_val = int(OPENAI_MAX_TOKENS)
+        except Exception:
+            openai_max_tokens_val = OPENAI_MAX_TOKENS
+
+    openai_temp_val = None
+    if OPENAI_TEMPERATURE and _is_number(OPENAI_TEMPERATURE):
+        try:
+            openai_temp_val = float(OPENAI_TEMPERATURE)
+        except Exception:
+            openai_temp_val = OPENAI_TEMPERATURE
+    else:
+        openai_temp_val = OPENAI_TEMPERATURE
 
     return {
         "status": overall_status,
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "agents": agent_status,
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "openai_configured": bool(OPENAI_API_KEY),
+        "openai_max_tokens": openai_max_tokens_val,
+        "openai_temperature": openai_temp_val,
+        "allowed_origins": origins
     }
 
 

@@ -178,12 +178,20 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
             # Ensure message contents are strings
             safe_messages = [{'role': m['role'], 'content': str(m['content'])} for m in messages]
 
-            response = self.client.chat.completions.create(
-                model=CHAT_MODEL,
-                messages=safe_messages,
-                temperature=temperature,
-                max_completion_tokens=MAX_TOKENS
-            )
+            try:
+                response = self.client.chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=safe_messages,
+                    temperature=temperature,
+                    max_completion_tokens=MAX_TOKENS
+                )
+            except Exception as e:
+                # Some models may reject temperature or max_completion_tokens; retry without them
+                logger.warning("OpenAI chat completion failed: %s. Retrying without temperature/max token params.", e)
+                response = self.client.chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=safe_messages
+                )
 
             assistant_response = response.choices[0].message.content
             return assistant_response, source_ids

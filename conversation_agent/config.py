@@ -36,5 +36,9 @@ KNOWLEDGE_BASE_PATH = Path(__file__).parent.parent / "data" / "ownquesta_kb.json
 
 # RAG Configuration
 TOP_K_RESULTS = 3  # Number of relevant documents to retrieve
-TEMPERATURE = 0.3 # Model temperature for responses
-MAX_TOKENS = 500  # Maximum tokens in response
+TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', os.getenv('TEMPERATURE', '0.3')))  # Model temperature for responses
+# MAX_TOKENS can be configured via env `OPENAI_MAX_TOKENS` or `MAX_TOKENS`; default 500
+try:
+    MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS') or '500')
+except Exception:
+    MAX_TOKENS = 500

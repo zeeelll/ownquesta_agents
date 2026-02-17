@@ -53,7 +53,42 @@ async def analyze_csv(req: ValidationRequest):
             print(f"DEBUG: ML validation failed during analyze: {e}")
             ml_result = {"error": str(e)}
 
-        response_data = {"status": "success", "result": result, "ml_result": ml_result}
+        # Provide consistent top-level keys for callers: `eda_result` and `ml_result`.
+        # Also include a human-readable agent_answer and a user_view_report markdown for display.
+        agent_answer = None
+        if isinstance(ml_result, dict) and ml_result.get('agent_answer'):
+            agent_answer = ml_result.get('agent_answer')
+        elif isinstance(result, dict) and result.get('aiInsights'):
+            agent_answer = result.get('aiInsights')
+        else:
+            # Fallback short summary
+            agent_answer = f"EDA completed: {result.get('shape', {}).get('rows', 'N/A')} rows × {result.get('shape', {}).get('columns', 'N/A')} columns."
+
+        # Build a simple user-facing markdown report combining EDA insights and ML summary
+        try:
+            report_lines = ["# Validation Report", ""]
+            report_lines.append(f"**Dataset:** {result.get('shape', {}).get('rows', 'N/A')} rows × {result.get('shape', {}).get('columns', 'N/A')} columns")
+            if result.get('insights'):
+                report_lines.append('\n## Key EDA Insights')
+                for k, v in result.get('insights', {}).items():
+                    if isinstance(v, list) and v:
+                        report_lines.append(f"- **{k}**: {('; '.join(v))}")
+            if isinstance(ml_result, dict):
+                if ml_result.get('modelRecommendations'):
+                    report_lines.append('\n## Model Recommendations')
+                    for m in ml_result.get('modelRecommendations', [])[:5]:
+                        report_lines.append(f"- {m.get('algorithm', m.get('type', 'Model'))}: {m.get('use_case') or m.get('description') or ''}")
+                if ml_result.get('performanceEstimates'):
+                    pe = ml_result.get('performanceEstimates')
+                    report_lines.append('\n## Performance Estimates')
+                    report_lines.append(f"- Confidence: {pe.get('confidence')}")
+                    report_lines.append(f"- Expected Accuracy: {pe.get('expected_accuracy')}")
+
+            user_view_report = '\n'.join(report_lines)
+        except Exception as e:
+            user_view_report = None
+
+        response_data = {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
         print(f"DEBUG: Response data created, size: {len(str(response_data))}")
         return response_data
     except Exception as e:
@@ -88,10 +123,20 @@ async def ml_validate(req: ValidationRequest):
         except Exception as e:
             print(f"DEBUG: generate_ml_ai_insights failed in ml_validate: {e}")
 
+        # Also include a short agent_answer and user_view_report for display
+        agent_answer = ml_result.get('agent_answer') if isinstance(ml_result, dict) else None
+        if not agent_answer and isinstance(eda_result, dict):
+            agent_answer = eda_result.get('aiInsights')
+
+        # Build lightweight report
+        report = f"Dataset: {eda_result.get('shape', {}).get('rows', 'N/A')} rows × {eda_result.get('shape', {}).get('columns', 'N/A')} columns."
+
         return {
             "status": "success",
             "eda_result": eda_result,
-            "ml_result": ml_result
+            "ml_result": ml_result,
+            "agent_answer": agent_answer,
+            "user_view_report": report
         }
     except Exception as e:
         raise HTTPException(
@@ -105,7 +150,20 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
     """Accept a multipart file upload (CSV) and optional goal form field, run enhanced EDA and return result."""
     try:
         raw = await file.read()
-        text = raw.decode('utf-8', errors='ignore')
+
+        # Determine file type: if Excel (xls/xlsx) then pass raw bytes to EDA parser
+        filename = (file.filename or '').lower()
+        content_type = (file.content_type or '').lower()
+        is_excel = False
+        if filename.endswith(('.xls', '.xlsx')):
+            is_excel = True
+        elif 'spreadsheet' in content_type or 'excel' in content_type:
+            is_excel = True
+
+        if is_excel:
+            parsed_input = raw  # bytes -> perform_advanced_eda_from_csv_text will handle Excel bytes
+        else:
+            parsed_input = raw.decode('utf-8', errors='ignore')
 
         parsed_goal = {}
         if goal:
@@ -114,7 +172,7 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
             except Exception:
                 parsed_goal = {"description": goal}
 
-        result = perform_advanced_eda_from_csv_text(text, goal=parsed_goal)
+        result = perform_advanced_eda_from_csv_text(parsed_input, goal=parsed_goal)
 
         # Add AI-powered EDA insights when available
         try:
@@ -132,7 +190,25 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
         except Exception as e:
             ml_result = {"error": str(e)}
 
-        return {"status": "success", "result": result, "ml_result": ml_result}
+        # Provide combined response with aliases and human-readable report
+        agent_answer = ml_result.get('agent_answer') if isinstance(ml_result, dict) else None
+        if not agent_answer and isinstance(result, dict):
+            agent_answer = result.get('aiInsights')
+
+        user_view_report = None
+        try:
+            report_lines = ["# Validation Report", ""]
+            report_lines.append(f"**Dataset:** {result.get('shape', {}).get('rows', 'N/A')} rows × {result.get('shape', {}).get('columns', 'N/A')} columns")
+            if result.get('insights'):
+                report_lines.append('\n## Key EDA Insights')
+                for k, v in result.get('insights', {}).items():
+                    if isinstance(v, list) and v:
+                        report_lines.append(f"- **{k}**: {('; '.join(v))}")
+            user_view_report = '\n'.join(report_lines)
+        except Exception:
+            user_view_report = None
+
+        return {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

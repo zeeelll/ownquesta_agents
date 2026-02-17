@@ -61,9 +61,13 @@ load_dotenv(dotenv_path=env_path)
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-CHAT_MODEL = "gpt-5-mini"  # Using GPT-5-mini for better performance
-TEMPERATURE = 0.3
-MAX_TOKENS = 1000
+CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-5-mini")  # model name override via env
+# Allow external configuration for temperature and max tokens
+TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', os.getenv('TEMPERATURE', '0.3')))
+try:
+    MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS') or '1000')
+except Exception:
+    MAX_TOKENS = 1000
 
 # Initialize OpenAI client
 openai_client = None
@@ -79,6 +83,43 @@ else:
     logging.warning("OPENAI_API_KEY not set. AI-enhanced features will be limited.")
 
 warnings.filterwarnings('ignore')
+
+
+def _safe_chat_completion_call(messages, model, **kwargs):
+    """Call the OpenAI chat completion API with defensive retries for unsupported params.
+
+    If the model rejects parameters like `temperature` or `max_completion_tokens`,
+    this helper will retry the call with those parameters removed.
+    """
+    if not openai_client:
+        raise RuntimeError("OpenAI client not configured")
+
+    try:
+        return openai_client.chat.completions.create(model=model, messages=messages, **kwargs)
+    except Exception as e:
+        err = str(e)
+        logging.warning("OpenAI chat completion failed on first attempt: %s", err)
+
+        # If the error mentions unsupported parameter(s), attempt retries without them
+        retry_kwargs = dict(kwargs)
+
+        # Common problematic params: temperature, max_completion_tokens
+        removed = []
+        for param in ('temperature', 'max_completion_tokens', 'max_tokens'):
+            if param in retry_kwargs:
+                retry_kwargs.pop(param)
+                removed.append(param)
+
+        if removed:
+            try:
+                logging.info("Retrying OpenAI chat completion without params: %s", removed)
+                return openai_client.chat.completions.create(model=model, messages=messages, **retry_kwargs)
+            except Exception as e2:
+                logging.error("OpenAI retry without params %s failed: %s", removed, e2)
+                raise
+
+        # No known params to remove or retry failed - re-raise
+        raise
 
 
 def analyze_user_question(question: str, eda_results: Dict[str, Any]) -> str:
@@ -284,15 +325,15 @@ Focus on:
 
 Keep your response concise but insightful, using bullet points."""
 
-        response = openai_client.chat.completions.create(
-            model=CHAT_MODEL,
+        response = _safe_chat_completion_call(
             messages=[
                 {"role": "system", "content": "You are an expert data scientist providing actionable insights about datasets. Be concise, practical, and focus on what matters most for successful machine learning."},
                 {"role": "user", "content": prompt}
             ],
+            model=CHAT_MODEL,
             temperature=TEMPERATURE,
             max_completion_tokens=MAX_TOKENS,
-            timeout=15  # Add 15 second timeout
+            timeout=15
         )
 
         ai_insights = response.choices[0].message.content.strip()
@@ -336,15 +377,15 @@ Provide 4-6 key strategic recommendations covering:
 
 Be specific to the {goal_type} task and dataset characteristics. Keep recommendations actionable and practical."""
 
-        response = openai_client.chat.completions.create(
-            model=CHAT_MODEL,
+        response = _safe_chat_completion_call(
             messages=[
                 {"role": "system", "content": "You are a senior ML engineer providing strategic guidance for machine learning projects. Focus on practical, implementable recommendations that drive success."},
                 {"role": "user", "content": prompt}
             ],
+            model=CHAT_MODEL,
             temperature=TEMPERATURE,
             max_completion_tokens=MAX_TOKENS,
-            timeout=15  # Add 15 second timeout
+            timeout=15
         )
 
         ai_insights = response.choices[0].message.content.strip()
@@ -355,15 +396,35 @@ Be specific to the {goal_type} task and dataset characteristics. Keep recommenda
 
 
 def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Enhanced CSV analysis with intelligent insights and recommendations."""
-    """Enhanced CSV analysis with intelligent insights and recommendations."""
+    """Enhanced CSV/Excel analysis with intelligent insights and recommendations.
+
+    Accepts either:
+    - a CSV text string,
+    - a bytes object containing an Excel file,
+    - or a pandas DataFrame.
+    """
     if goal is None:
         goal = {"type": "eda", "description": "Exploratory Data Analysis"}
 
     try:
-        df = pd.read_csv(io.StringIO(csv_text))
+        # If caller passed a DataFrame directly, use it
+        if isinstance(csv_text, pd.DataFrame):
+            df = csv_text.copy()
+        # If raw bytes (e.g., uploaded Excel), try to read as Excel first
+        elif isinstance(csv_text, (bytes, bytearray)):
+            try:
+                df = pd.read_excel(io.BytesIO(csv_text))
+            except Exception:
+                # Fallback: attempt to decode as UTF-8 CSV text
+                try:
+                    df = pd.read_csv(io.StringIO(csv_text.decode('utf-8', errors='ignore')))
+                except Exception as e:
+                    return {"error": f"Failed to parse bytes as Excel or CSV: {str(e)}", "isValid": False}
+        else:
+            # Assume string CSV
+            df = pd.read_csv(io.StringIO(str(csv_text)))
     except Exception as e:
-        return {"error": f"Failed to parse CSV: {str(e)}", "isValid": False}
+        return {"error": f"Failed to parse input as CSV/Excel: {str(e)}", "isValid": False}
 
     if df.empty:
         return _sanitize_for_json({"error": "Dataset is empty", "isValid": False})
