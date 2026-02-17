@@ -519,7 +519,19 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
             quality_score -= 20  # Many outliers
         if abs(series.skew()) > 2:
             quality_score -= 15  # Highly skewed
-            
+        # Histogram/distribution (use 10 bins or 'auto' if enough samples)
+        try:
+            bins = 'auto' if len(series) > 50 else 10
+            counts, bin_edges = np.histogram(series, bins=bins)
+            distribution = {
+                'bins': [round(float(b), 6) for b in bin_edges.tolist()],
+                'counts': [int(c) for c in counts.tolist()]
+            }
+        except Exception:
+            distribution = {'bins': [], 'counts': []}
+
+        # canonical normal flag
+        normal_flag = bool(is_normal)
         numerical_summary[col] = {
             "count": int(series.count()),
             "unique": int(series.nunique()),
@@ -548,6 +560,9 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
             "isConstant": bool(series.nunique() == 1),
             "hasZeros": bool((series == 0).any()),
             "zerosCount": int((series == 0).sum())
+            ,
+            "distribution": distribution,
+            "isNormal": normal_flag
         }
 
     # Enhanced categorical summary
@@ -713,6 +728,62 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
         if imbalanced_cats:
             insights['distributionInsights'].append(f"Highly imbalanced categorical features: {', '.join(imbalanced_cats[:3])}")
 
+    # Correlation pair ranking (top pairs by absolute correlation)
+    correlation_pairs = []
+    if correlation:
+        seen = set()
+        for c1, row in correlation.items():
+            for c2, val in row.items():
+                if c1 == c2: 
+                    continue
+                pair = tuple(sorted((c1, c2)))
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                correlation_pairs.append({'pair': pair, 'value': float(val), 'abs': abs(float(val))})
+        correlation_pairs = sorted(correlation_pairs, key=lambda x: x['abs'], reverse=True)
+
+    correlation_insights = []
+    for p in correlation_pairs[:10]:
+        tag = 'strong' if p['abs'] > 0.7 else 'moderate' if p['abs'] > 0.4 else 'weak'
+        correlation_insights.append({
+            'columns': list(p['pair']),
+            'correlation': round(p['value'], 4),
+            'strength': tag
+        })
+
+    # Build concise numeric summary mapping for quick UI display
+    summary = {}
+    for col, info in numerical_summary.items():
+        summary[col] = {
+            'mean': info.get('mean'),
+            'median': info.get('median'),
+            'mode': info.get('mode'),
+            'variance': info.get('variance'),
+            'std': info.get('std'),
+            'min': info.get('min'),
+            'max': info.get('max'),
+            'iqr': info.get('iqr'),
+            'skewness': info.get('skewness'),
+            'isNormal': info.get('isNormal'),
+            'outliers': info.get('outliers'),
+            'outliersPercentage': info.get('outliersPercentage')
+        }
+
+    # Dataset-level info
+    try:
+        dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()}
+        memory_bytes = int(df.memory_usage(deep=True).sum())
+    except Exception:
+        dtypes = {col: str(df[col].dtype) for col in df.columns}
+        memory_bytes = 0
+
+    info = {
+        'dtypes': dtypes,
+        'memoryBytes': memory_bytes,
+        'memoryReadable': f"{round(memory_bytes / 1024 / 1024, 3)} MB" if memory_bytes else 'N/A'
+    }
+
     result = {
         'shape': shape,
         'size': size,
@@ -726,6 +797,9 @@ def perform_advanced_eda_from_csv_text(csv_text: str, goal: Dict[str, Any] = Non
         'numericalSummary': numerical_summary,
         'objectSummary': object_summary,
         'correlation': correlation,
+        'correlationPairs': correlation_insights,
+        'summary': summary,
+        'info': info,
         'validationChecks': validation_checks,
         'isValid': validation_checks['hasData'] and validation_checks['hasColumns'] and validation_checks['readinessScore'] > 30,
         'goal': goal,

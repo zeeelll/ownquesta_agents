@@ -90,6 +90,13 @@ async def analyze_csv(req: ValidationRequest):
 
         response_data = {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
         print(f"DEBUG: Response data created, size: {len(str(response_data))}")
+        # Expose convenient top-level aliases for UI clients
+        response_data.update({
+            'summary': result.get('summary'),
+            'info': result.get('info'),
+            'correlationPairs': result.get('correlationPairs'),
+            'numericalSummary': result.get('numericalSummary')
+        })
         return response_data
     except Exception as e:
         print(f"DEBUG: Error in analyze_csv: {e}")
@@ -136,7 +143,11 @@ async def ml_validate(req: ValidationRequest):
             "eda_result": eda_result,
             "ml_result": ml_result,
             "agent_answer": agent_answer,
-            "user_view_report": report
+            "user_view_report": report,
+            "summary": eda_result.get('summary'),
+            "info": eda_result.get('info'),
+            "correlationPairs": eda_result.get('correlationPairs'),
+            "numericalSummary": eda_result.get('numericalSummary')
         }
     except Exception as e:
         raise HTTPException(
@@ -208,7 +219,15 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
         except Exception:
             user_view_report = None
 
-        return {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
+        # Add convenient top-level aliases for UI
+        response = {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
+        response.update({
+            'summary': result.get('summary'),
+            'info': result.get('info'),
+            'correlationPairs': result.get('correlationPairs'),
+            'numericalSummary': result.get('numericalSummary')
+        })
+        return response
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

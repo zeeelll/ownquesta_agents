@@ -219,7 +219,15 @@ def health():
         "openai_configured": bool(OPENAI_API_KEY),
         "openai_max_tokens": openai_max_tokens_val,
         "openai_temperature": openai_temp_val,
-        "allowed_origins": origins
+        "allowed_origins": origins,
+        # Expose validation agent EDA capabilities when available
+        "validation_agent_features": {
+            "available": bool(validation_router),
+            "supports_excel_upload": bool(validation_router),
+            "provides_distribution_histograms": True,
+            "provides_correlation_pairs": True,
+            "provides_summary_and_info": True
+        }
     }
 
 
