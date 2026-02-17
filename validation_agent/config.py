@@ -291,7 +291,7 @@ Keep your response concise but insightful, using bullet points."""
                 {"role": "user", "content": prompt}
             ],
             temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
+            max_completion_tokens=MAX_TOKENS,
             timeout=15  # Add 15 second timeout
         )
 
@@ -343,7 +343,7 @@ Be specific to the {goal_type} task and dataset characteristics. Keep recommenda
                 {"role": "user", "content": prompt}
             ],
             temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
+            max_completion_tokens=MAX_TOKENS,
             timeout=15  # Add 15 second timeout
         )
 

@@ -182,7 +182,7 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
                 model=CHAT_MODEL,
                 messages=safe_messages,
                 temperature=temperature,
-                max_tokens=MAX_TOKENS
+                max_completion_tokens=MAX_TOKENS
             )
 
             assistant_response = response.choices[0].message.content

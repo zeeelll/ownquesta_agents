@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from .config import perform_advanced_eda_from_csv_text, analyze_user_question, perform_ml_validation_from_eda, generate_ai_insights
+from .config import perform_advanced_eda_from_csv_text, analyze_user_question, perform_ml_validation_from_eda, generate_ai_insights, generate_ml_ai_insights
 import json
 from pathlib import Path
 from fastapi.responses import PlainTextResponse
@@ -32,14 +32,28 @@ async def analyze_csv(req: ValidationRequest):
         print(f"DEBUG: Received request with csv_text length: {len(req.csv_text)}")
         result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
         print(f"DEBUG: EDA completed, result keys: {list(result.keys())}")
-        # Add AI-powered insights when available (returns friendly message if OpenAI not configured)
+
+        # Add AI-powered EDA insights when available (graceful fallback if OpenAI not configured)
         try:
             ai_insights = generate_ai_insights(result)
             result['aiInsights'] = ai_insights
         except Exception as e:
             print(f"DEBUG: generate_ai_insights failed: {e}")
 
-        response_data = {"status": "success", "result": result}
+        # Also perform ML validation based on EDA so callers get both EDA + ML validation report
+        try:
+            ml_result = perform_ml_validation_from_eda(result)
+            # Add ML-specific AI insights as well
+            try:
+                ml_ai = generate_ml_ai_insights(result, ml_result)
+                ml_result['aiInsights'] = ml_ai
+            except Exception as e:
+                print(f"DEBUG: generate_ml_ai_insights failed: {e}")
+        except Exception as e:
+            print(f"DEBUG: ML validation failed during analyze: {e}")
+            ml_result = {"error": str(e)}
+
+        response_data = {"status": "success", "result": result, "ml_result": ml_result}
         print(f"DEBUG: Response data created, size: {len(str(response_data))}")
         return response_data
     except Exception as e:
@@ -58,12 +72,24 @@ async def ml_validate(req: ValidationRequest):
     try:
         # First perform EDA
         eda_result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
-        
+
+        # Add AI-powered EDA insights when available
+        try:
+            eda_result['aiInsights'] = generate_ai_insights(eda_result)
+        except Exception as e:
+            print(f"DEBUG: generate_ai_insights failed in ml_validate: {e}")
+
         # Then perform ML validation
         ml_result = perform_ml_validation_from_eda(eda_result)
-        
+
+        # Add ML AI insights (strategy/recommendations)
+        try:
+            ml_result['aiInsights'] = generate_ml_ai_insights(eda_result, ml_result)
+        except Exception as e:
+            print(f"DEBUG: generate_ml_ai_insights failed in ml_validate: {e}")
+
         return {
-            "status": "success", 
+            "status": "success",
             "eda_result": eda_result,
             "ml_result": ml_result
         }
@@ -89,7 +115,24 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
                 parsed_goal = {"description": goal}
 
         result = perform_advanced_eda_from_csv_text(text, goal=parsed_goal)
-        return {"status": "success", "result": result}
+
+        # Add AI-powered EDA insights when available
+        try:
+            result['aiInsights'] = generate_ai_insights(result)
+        except Exception as e:
+            print(f"DEBUG: generate_ai_insights failed in validate_upload: {e}")
+
+        # Also run ML validation so the caller receives EDA + ML report in one response
+        try:
+            ml_result = perform_ml_validation_from_eda(result)
+            try:
+                ml_result['aiInsights'] = generate_ml_ai_insights(result, ml_result)
+            except Exception as e:
+                print(f"DEBUG: generate_ml_ai_insights failed in validate_upload: {e}")
+        except Exception as e:
+            ml_result = {"error": str(e)}
+
+        return {"status": "success", "result": result, "ml_result": ml_result}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -101,7 +101,8 @@ const ValidationAgenticAI = () => {
 
     try {
       // Call ML validation endpoint which includes EDA
-      const response = await fetch('/ml-validation/validate', {
+      const validationUrl = (typeof window !== 'undefined' && (window.__OWNQUESTA_VALIDATION_URL || window.OWNQUESTA_VALIDATION_URL)) || 'http://localhost:8000/validation/validate';
+      const response = await fetch(validationUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
