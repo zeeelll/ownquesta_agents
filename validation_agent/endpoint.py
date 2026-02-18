@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from .config import perform_advanced_eda_from_csv_text, analyze_user_question, perform_ml_validation_from_eda, generate_ai_insights, generate_ml_ai_insights
 import json
+import base64
 from pathlib import Path
 from fastapi.responses import PlainTextResponse
 
@@ -10,7 +11,10 @@ router = APIRouter()
 
 
 class ValidationRequest(BaseModel):
-    csv_text: str
+    csv_text: Optional[str] = None
+    file_data: Optional[str] = None  # Base64 encoded file data for Excel
+    file_type: Optional[str] = 'csv'  # 'csv' or 'excel'
+    filename: Optional[str] = None
     goal: Optional[Dict[str, Any]] = None
 
 
@@ -27,10 +31,25 @@ class AskRequest(BaseModel):
 
 @router.post("/analyze")
 async def analyze_csv(req: ValidationRequest):
-    """Analyze CSV text and return an enhanced EDA summary produced by the validation agent."""
+    """Analyze CSV or Excel file and return an enhanced EDA summary produced by the validation agent."""
     try:
-        print(f"DEBUG: Received request with csv_text length: {len(req.csv_text)}")
-        result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
+        # Handle different input formats
+        data_input = None
+        
+        if req.file_type == 'excel' and req.file_data:
+            # Decode base64 Excel data
+            print(f"DEBUG: Received Excel file (base64 length: {len(req.file_data)})")
+            file_bytes = base64.b64decode(req.file_data)
+            data_input = file_bytes
+            print(f"DEBUG: Decoded to {len(file_bytes)} bytes")
+        elif req.csv_text:
+            # CSV text
+            print(f"DEBUG: Received CSV text (length: {len(req.csv_text)})")
+            data_input = req.csv_text
+        else:
+            raise HTTPException(status_code=400, detail="Either csv_text or file_data must be provided")
+        
+        result = perform_advanced_eda_from_csv_text(data_input, goal=req.goal or {})
         print(f"DEBUG: EDA completed, result keys: {list(result.keys())}")
 
         # Add AI-powered EDA insights when available (graceful fallback if OpenAI not configured)

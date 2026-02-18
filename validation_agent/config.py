@@ -61,9 +61,10 @@ load_dotenv(dotenv_path=env_path)
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-5-mini")  # model name override via env
+CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")  # Use gpt-4o-mini for better compatibility
 # Allow external configuration for temperature and max tokens
-TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', os.getenv('TEMPERATURE', '0.3')))
+# Default temperature to 1.0 for models that don't support custom temperature
+TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', os.getenv('TEMPERATURE', '1.0')))
 try:
     MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS') or '1000')
 except Exception:
@@ -95,6 +96,14 @@ def _safe_chat_completion_call(messages, model, **kwargs):
         raise RuntimeError("OpenAI client not configured")
 
     try:
+        # Use max_tokens instead of max_completion_tokens for better compatibility
+        if 'max_completion_tokens' in kwargs:
+            kwargs['max_tokens'] = kwargs.pop('max_completion_tokens')
+        
+        # Remove temperature if it's the default (1.0) to avoid issues
+        if kwargs.get('temperature') == 1.0:
+            kwargs.pop('temperature', None)
+        
         return openai_client.chat.completions.create(model=model, messages=messages, **kwargs)
     except Exception as e:
         err = str(e)
@@ -103,9 +112,9 @@ def _safe_chat_completion_call(messages, model, **kwargs):
         # If the error mentions unsupported parameter(s), attempt retries without them
         retry_kwargs = dict(kwargs)
 
-        # Common problematic params: temperature, max_completion_tokens
+        # Common problematic params: temperature, max_completion_tokens, max_tokens
         removed = []
-        for param in ('temperature', 'max_completion_tokens', 'max_tokens'):
+        for param in ('temperature', 'max_completion_tokens', 'max_tokens', 'timeout'):
             if param in retry_kwargs:
                 retry_kwargs.pop(param)
                 removed.append(param)

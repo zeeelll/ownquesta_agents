@@ -308,90 +308,82 @@ print("Next steps: Choose target variable and run ML models")
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center">
             <Target className="w-5 h-5 mr-2 text-green-600" />
-            Detected Goal: {detectedGoal?.description}
+            Analysis Goal
           </h3>
-          <div className="space-y-2">
-            {detectedGoal?.focus.map((item, index) => (
-              <div key={index} className="flex items-center">
-                <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                <span className="text-sm">{item}</span>
-              </div>
-            ))}
+          <div className="p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
+            <div className="font-medium text-lg text-gray-800 mb-2">{detectedGoal?.description}</div>
+            <div className="text-sm text-gray-600">Focus Areas:</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+              {detectedGoal?.focus.slice(0, 4).map((item, index) => (
+                <div key={index} className="flex items-center">
+                  <CheckCircle className="w-4 h-4 text-green-500 mr-2 flex-shrink-0" />
+                  <span className="text-sm">{item}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center">
             <TrendingUp className="w-5 h-5 mr-2 text-blue-600" />
-            Data Quality Assessment
+            Quick Insights
           </h3>
-          <div className="space-y-3">
-            {edaResults.insights?.dataQuality?.map((insight, index) => (
-              <div key={index} className="p-3 bg-gray-50 rounded text-sm border-l-4 border-blue-400">
-                {insight}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+              <div className="font-medium text-blue-900 mb-1">Data Quality</div>
+              <div className="text-sm text-blue-700">
+                {edaResults.insights?.dataQuality?.[0] || 'Assessment completed'}
               </div>
-            )) || (
-              <div className="p-3 bg-gray-50 rounded text-sm">
-                Data quality assessment completed. Check the detailed analysis for more insights.
+            </div>
+            <div className="p-4 bg-green-50 rounded-lg border-l-4 border-green-500">
+              <div className="font-medium text-green-900 mb-1">ML Readiness</div>
+              <div className="text-sm text-green-700">
+                {mlValidationResult?.status === 'PROCEED' ? 
+                  `✅ Ready (Score: ${mlValidationResult?.satisfaction_score}/100)` : 
+                  'Check ML Validation tab for details'}
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* ML Validation Results */}
+        {/* Simplified ML Status Card */}
         {(mlValidationResult || mlResults) && (
-          <div className="space-y-4">
-            {/* Goal Understanding */}
-            {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding) && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold mb-4 text-purple-900">🎯 Goal Analysis</h3>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Task Type:</p>
-                    <p className="font-medium text-gray-800 capitalize text-lg">
-                      {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.interpreted_task}
-                    </p>
-                  </div>
-                  
-                  {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.target_column_guess && (
-                    <div>
-                      <p className="text-sm text-gray-600 mb-1">Suggested Target:</p>
-                      <p className="font-medium text-purple-700 text-lg">
-                        {(mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.target_column_guess}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Confidence:</p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-gray-200 rounded-full h-3">
-                        <div 
-                          className="bg-purple-600 h-3 rounded-full transition-all duration-300"
-                          style={{width: `${((mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.confidence || 0) * 100}%`}}
-                        ></div>
-                      </div>
-                      <span className="text-sm font-medium">
-                        {(((mlValidationResult?.goal_understanding || mlResults?.goal_understanding)?.confidence || 0) * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
+          <div className={`rounded-lg shadow p-6 border-l-4 ${
+            mlValidationResult?.status === 'PROCEED' ? 'bg-green-50 border-green-500' :
+            mlValidationResult?.status === 'PAUSE' ? 'bg-yellow-50 border-yellow-500' :
+            'bg-blue-50 border-blue-500'
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl ${
+                mlValidationResult?.status === 'PROCEED' ? 'bg-green-100 text-green-700' :
+                mlValidationResult?.status === 'PAUSE' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-blue-100 text-blue-700'
+              }`}>
+                {mlValidationResult?.status === 'PROCEED' ? '✅' : 
+                 mlValidationResult?.status === 'PAUSE' ? '⚠️' : '📊'}
               </div>
-            )}
-
-            {/* Recommendations */}
-            {(mlValidationResult?.optional_questions || mlResults?.optional_questions) && (mlValidationResult?.optional_questions || mlResults?.optional_questions).length > 0 && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold mb-4 text-teal-900">💡 Recommendations</h3>
-                <ul className="space-y-2">
-                  {(mlValidationResult?.optional_questions || mlResults?.optional_questions).map((question, idx) => (
-                    <li key={idx} className="flex items-start gap-3 bg-teal-50 p-3 rounded">
-                      <span className="text-teal-600 font-bold text-lg">•</span>
-                      <span className="text-gray-800">{question}</span>
-                    </li>
-                  ))}
-                </ul>
+              <div>
+                <h3 className={`text-xl font-bold ${
+                  mlValidationResult?.status === 'PROCEED' ? 'text-green-800' :
+                  mlValidationResult?.status === 'PAUSE' ? 'text-yellow-800' :
+                  'text-blue-800'
+                }`}>
+                  {mlValidationResult?.status === 'PROCEED' ? 'Ready to Proceed!' :
+                   mlValidationResult?.status === 'PAUSE' ? 'Review Required' :
+                   'Analysis Complete'}
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Quality Score: {mlValidationResult?.satisfaction_score || mlResults?.satisfaction_score || 'N/A'}/100
+                </p>
+              </div>
+            </div>
+            {(mlValidationResult?.agent_answer || mlResults?.agent_answer) && (
+              <div className="mt-4 p-3 bg-white rounded border">
+                <div className="text-sm text-gray-700 line-clamp-3">
+                  {(mlValidationResult?.agent_answer || mlResults?.agent_answer).split('\n')[0]}
+                </div>
+                <div className="text-xs text-blue-600 mt-1">View full report in ML Validation tab</div>
               </div>
             )}
           </div>
@@ -405,9 +397,38 @@ print("Next steps: Choose target variable and run ML models")
 
     return (
       <div className="space-y-6">
+        {/* Missing Values Analysis */}
+        {edaResults.missingValues && Object.keys(edaResults.missingValues).length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold mb-4">Missing Values Analysis</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {Object.entries(edaResults.missingValues)
+                .filter(([col, info]) => info.count > 0)
+                .map(([col, info]) => (
+                  <div key={col} className={`p-4 rounded-lg border-l-4 ${
+                    info.percentage > 50 ? 'bg-red-50 border-red-500' :
+                    info.percentage > 20 ? 'bg-yellow-50 border-yellow-500' :
+                    'bg-blue-50 border-blue-500'
+                  }`}>
+                    <div className="font-medium text-gray-800 truncate">{col}</div>
+                    <div className="text-2xl font-bold mt-1">{info.percentage}%</div>
+                    <div className="text-xs text-gray-600">{info.count} missing</div>
+                  </div>
+                ))
+              }
+              {Object.values(edaResults.missingValues).every(info => info.count === 0) && (
+                <div className="col-span-full text-center p-4 bg-green-50 rounded-lg border border-green-200">
+                  <span className="text-green-700 font-medium">✓ No missing values detected</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4">Numerical Features Summary</h3>
           <div className="overflow-x-auto">
+            {edaResults.numericalSummary && Object.keys(edaResults.numericalSummary).length > 0 ? (
             <table className="min-w-full table-auto">
               <thead>
                 <tr className="bg-gray-50">
@@ -436,11 +457,15 @@ print("Next steps: Choose target variable and run ML models")
                 ))}
               </tbody>
             </table>
+            ) : (
+              <p className="text-gray-500 text-center py-4">No numerical features found in the dataset</p>
+            )}
           </div>
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4">Categorical Features Summary</h3>
+          {edaResults.objectSummary && Object.keys(edaResults.objectSummary).length > 0 ? (
           <div className="space-y-4">
             {Object.entries(edaResults.objectSummary).map(([col, stats]) => (
               <div key={col} className="border rounded p-4">
@@ -448,12 +473,15 @@ print("Next steps: Choose target variable and run ML models")
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>Unique: {stats.unique}</div>
                   <div>Entropy: {stats.entropy}</div>
-                  <div>Top Value: {stats.topValues[0]?.value}</div>
-                  <div>Top %: {stats.topValues[0]?.percentage}%</div>
+                  <div>Top Value: {stats.topValues?.[0]?.value || 'N/A'}</div>
+                  <div>Top %: {stats.topValues?.[0]?.percentage || 0}%</div>
                 </div>
               </div>
             ))}
           </div>
+          ) : (
+            <p className="text-gray-500 text-center py-4">No categorical features found in the dataset</p>
+          )}
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">
@@ -493,6 +521,53 @@ print("Next steps: Choose target variable and run ML models")
             <p className="text-gray-500">No correlations available (need at least 2 numeric columns)</p>
           )}
         </div>
+
+        {/* Data Quality Insights */}
+        {edaResults.insights && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold mb-4">Data Quality Insights</h3>
+            <div className="space-y-4">
+              {edaResults.insights.dataQuality && edaResults.insights.dataQuality.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-blue-900 mb-2">📊 Data Quality</h4>
+                  <div className="space-y-2">
+                    {edaResults.insights.dataQuality.map((insight, idx) => (
+                      <div key={idx} className="p-3 bg-blue-50 rounded-lg text-sm border-l-4 border-blue-400">
+                        {insight}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {edaResults.insights.featureInsights && edaResults.insights.featureInsights.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-green-900 mb-2">🔍 Feature Insights</h4>
+                  <div className="space-y-2">
+                    {edaResults.insights.featureInsights.slice(0, 5).map((insight, idx) => (
+                      <div key={idx} className="p-3 bg-green-50 rounded-lg text-sm border-l-4 border-green-400">
+                        {insight}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {edaResults.insights.correlationInsights && edaResults.insights.correlationInsights.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-purple-900 mb-2">🔗 Correlation Insights</h4>
+                  <div className="space-y-2">
+                    {edaResults.insights.correlationInsights.slice(0, 3).map((insight, idx) => (
+                      <div key={idx} className="p-3 bg-purple-50 rounded-lg text-sm border-l-4 border-purple-400">
+                        {insight}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -761,15 +836,26 @@ print("Next steps: Choose target variable and run ML models")
         </div>
 
         <div className="space-y-4">
-          {questions.map((q, index) => (
-            <div key={index} className="bg-white rounded-lg shadow p-6">
-              <div className="mb-3">
-                <div className="font-medium text-gray-800">Q: {q.question}</div>
-                <div className="text-xs text-gray-500">{q.timestamp}</div>
-              </div>
-              <div className="text-gray-700">{q.answer}</div>
+          {questions.length === 0 ? (
+            <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
+              <p>No questions asked yet. Start by asking a question about your dataset!</p>
             </div>
-          ))}
+          ) : (
+            questions.slice(-3).map((q, index) => (
+              <div key={index} className="bg-white rounded-lg shadow p-6">
+                <div className="mb-3">
+                  <div className="font-medium text-gray-800">Q: {q.question}</div>
+                  <div className="text-xs text-gray-500">{q.timestamp}</div>
+                </div>
+                <div className="text-gray-700">{q.answer}</div>
+              </div>
+            ))
+          )}
+          {questions.length > 3 && (
+            <div className="text-center text-sm text-gray-500">
+              Showing last 3 of {questions.length} questions
+            </div>
+          )}
         </div>
       </div>
     );
@@ -854,72 +940,25 @@ print("Next steps: Choose target variable and run ML models")
 
         {currentStep === 'results' && (
           <div className="space-y-6">
-            {/* Status Summary */}
-            {(mlValidationResult || mlResults) && (
-              <div className={`rounded-lg shadow-lg p-6 border-l-4 ${
-                mlValidationResult?.status === 'PROCEED' ? 'bg-green-50 border-green-500' :
-                mlValidationResult?.status === 'PAUSE' ? 'bg-yellow-50 border-yellow-500' :
-                'bg-blue-50 border-blue-500'
-              }`}>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${
-                    mlValidationResult?.status === 'PROCEED' ? 'bg-green-100 text-green-700' :
-                    mlValidationResult?.status === 'PAUSE' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-blue-100 text-blue-700'
-                  }`}>
-                    {mlValidationResult?.status === 'PROCEED' ? '✅' : 
-                     mlValidationResult?.status === 'PAUSE' ? '⚠️' : '📊'}
-                  </div>
-                  <div>
-                    <h3 className={`text-2xl font-bold ${
-                      mlValidationResult?.status === 'PROCEED' ? 'text-green-800' :
-                      mlValidationResult?.status === 'PAUSE' ? 'text-yellow-800' :
-                      'text-blue-800'
-                    }`}>
-                      {mlValidationResult?.status === 'PROCEED' ? 'Ready to Proceed!' :
-                       mlValidationResult?.status === 'PAUSE' ? 'Needs Attention' :
-                       'Analysis Complete'}
-                    </h3>
-                    <p className="text-lg font-medium text-gray-600">
-                      Quality Score: {mlValidationResult?.satisfaction_score || mlResults?.satisfaction_score || 'N/A'}/100
-                    </p>
-                  </div>
+            {/* Analysis Complete Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg shadow-lg p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-3xl">
+                  🎯
                 </div>
-
-                {/* Detected Goal */}
-                {detectedGoal && (
-                  <div className="bg-white p-4 rounded-lg border border-gray-200 mb-4">
-                    <h4 className="font-semibold text-gray-800 mb-2">🎯 Detected Goal: {detectedGoal.description}</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                      {detectedGoal.focus.map((item, index) => (
-                        <div key={index} className="flex items-center">
-                          <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Agent Answer */}
-                {(mlValidationResult?.agent_answer || mlResults?.agent_answer) && (
-                  <div className="bg-white p-4 rounded-lg border border-gray-200">
-                    <h4 className="font-semibold text-gray-800 mb-2">🤖 AI Agent Analysis:</h4>
-                    <div className="prose prose-sm max-w-none">
-                      <div className="whitespace-pre-wrap text-gray-700">
-                        {mlValidationResult?.agent_answer || mlResults?.agent_answer}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <h2 className="text-2xl font-bold">Analysis Complete</h2>
+                  <p className="text-blue-100">Comprehensive validation results ready</p>
+                </div>
               </div>
-            )}
+            </div>
 
             <div className="bg-white rounded-lg shadow p-4">
               <div className="flex space-x-1 mb-4">
                 {[
                   { id: 'overview', label: 'Overview', icon: Database },
-                  { id: 'eda', label: 'Detailed Analysis', icon: BarChart3 },
+                  { id: 'eda', label: 'Exploratory Analysis', icon: BarChart3 },
+                  { id: 'ml', label: 'ML Validation', icon: Brain },
                   { id: 'code', label: 'Code & Insights', icon: Code },
                   { id: 'questions', label: 'Ask Questions', icon: MessageSquare }
                 ].map((tab) => (
@@ -941,6 +980,7 @@ print("Next steps: Choose target variable and run ML models")
               <div className="min-h-96">
                 {activeTab === 'overview' && renderOverview()}
                 {activeTab === 'eda' && renderEDA()}
+                {activeTab === 'ml' && renderMLValidation()}
                 {activeTab === 'code' && renderCode()}
                 {activeTab === 'questions' && renderQuestions()}
               </div>
