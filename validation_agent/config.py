@@ -63,12 +63,15 @@ load_dotenv(dotenv_path=env_path)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")  # Use gpt-4o-mini for better compatibility
 # Allow external configuration for temperature and max tokens
-# Default temperature to 1.0 for models that don't support custom temperature
-TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', os.getenv('TEMPERATURE', '1.0')))
+# Default temperature to 0.7 for faster, more deterministic responses
+TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', os.getenv('TEMPERATURE', '0.7')))
 try:
-    MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS') or '1000')
+    MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS') or '4096')
 except Exception:
-    MAX_TOKENS = 1000
+    MAX_TOKENS = 4096
+
+# Timeout configuration (set high to avoid interruptions)
+API_TIMEOUT = int(os.getenv('OPENAI_TIMEOUT', '120'))  # 2 minutes default
 
 # Initialize OpenAI client
 openai_client = None
@@ -545,7 +548,7 @@ Keep your response concise but insightful, using bullet points."""
             model=CHAT_MODEL,
             temperature=TEMPERATURE,
             max_completion_tokens=MAX_TOKENS,
-            timeout=15
+            timeout=API_TIMEOUT
         )
 
         ai_insights = response.choices[0].message.content.strip()
@@ -597,7 +600,7 @@ Be specific to the {goal_type} task and dataset characteristics. Keep recommenda
             model=CHAT_MODEL,
             temperature=TEMPERATURE,
             max_completion_tokens=MAX_TOKENS,
-            timeout=15
+            timeout=API_TIMEOUT
         )
 
         ai_insights = response.choices[0].message.content.strip()
