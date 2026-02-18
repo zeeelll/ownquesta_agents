@@ -123,82 +123,285 @@ def _safe_chat_completion_call(messages, model, **kwargs):
 
 
 def analyze_user_question(question: str, eda_results: Dict[str, Any]) -> str:
-    """Analyze user questions about the dataset and provide intelligent responses."""
+    """Analyze user questions about the dataset and provide intelligent, comprehensive responses."""
     q_lower = question.lower().strip()
     
     # Dataset overview questions
-    if any(keyword in q_lower for keyword in ['overview', 'summary', 'describe', 'tell me about']):
+    if any(keyword in q_lower for keyword in ['overview', 'summary', 'describe', 'tell me about', 'about']):
         shape = eda_results.get('shape', {})
         rows = shape.get('rows', 0)
         cols = shape.get('columns', 0)
-        missing_pct = sum(v['percentage'] for v in eda_results.get('missingValues', {}).values()) / max(1, cols)
+        missing_pct = sum(v.get('percentage', 0) for v in eda_results.get('missingValues', {}).values()) / max(1, cols)
         
-        return f"""📊 **Dataset Overview**:
-• **Size**: {rows:,} rows × {cols} columns 
-• **Data Quality**: {eda_results.get('validationChecks', {}).get('dataQuality', 'Unknown')}
-• **Missing Data**: {missing_pct:.1f}% average across columns
-• **Numeric Columns**: {len(eda_results.get('numericColumns', []))}
-• **Categorical Columns**: {len(eda_results.get('objectColumns', []))}
+        quality_score = "Good" if missing_pct < 10 else "Fair" if missing_pct < 30 else "Needs attention"
+        
+        return f"""📊 **Comprehensive Dataset Overview**:
 
-This dataset appears suitable for {eda_results.get('goal', {}).get('description', 'analysis')}."""
+🔢 **Size & Structure**:
+• **{rows:,} rows** × **{cols} columns**
+• **{len(eda_results.get('numericColumns', []))} numeric** features for quantitative analysis
+• **{len(eda_results.get('objectColumns', []))} categorical** features for classification
+
+📈 **Data Quality Assessment**:
+• **Missing Data**: {missing_pct:.1f}% average (Quality: {quality_score})
+• **Data Integrity**: {eda_results.get('validationChecks', {}).get('dataQuality', 'Analyzing...')}
+• **Memory Footprint**: ~{(rows * cols * 8 / 1024 / 1024):.1f} MB estimated
+
+🎯 **ML Readiness**:
+• Dataset size: {'✅ Sufficient' if rows > 1000 else '⚠️ Small sample'} for machine learning
+• Feature variety: {'✅ Balanced' if 2 <= len(eda_results.get('numericColumns', [])) <= 50 else '⚠️ Review features'}
+• **Recommendation**: {eda_results.get('goal', {}).get('description', 'Ready for analysis')}
+
+💡 **Next Steps**: This dataset appears suitable for {'supervised learning' if len(eda_results.get('numericColumns', [])) > 0 else 'exploratory analysis'}."""
     
-    # Missing data questions
-    if any(keyword in q_lower for keyword in ['missing', 'null', 'empty', 'incomplete']):
+    # Missing data questions - enhanced analysis
+    if any(keyword in q_lower for keyword in ['missing', 'null', 'empty', 'incomplete', 'nan']):
         missing_vals = eda_results.get('missingValues', {})
-        high_missing = {col: info for col, info in missing_vals.items() if info['percentage'] > 20}
+        if not missing_vals:
+            return "✅ **Excellent Data Quality!** No missing values detected. Your dataset is clean and ready for ML modeling."
+            
+        total_cols = len(missing_vals)
+        high_missing = {col: info for col, info in missing_vals.items() if info.get('percentage', 0) > 20}
+        moderate_missing = {col: info for col, info in missing_vals.items() if 5 < info.get('percentage', 0) <= 20}
+        low_missing = {col: info for col, info in missing_vals.items() if 0 < info.get('percentage', 0) <= 5}
         
-        if not high_missing:
-            return "✅ **Good news!** Your dataset has minimal missing values (all columns <20% missing). This is excellent for most ML tasks."
-        else:
-            problems = [f"• **{col}**: {info['percentage']}% missing ({info['count']:,} values)" 
-                       for col, info in high_missing.items()]
-            return f"⚠️ **Missing Data Issues Found**:\n" + "\n".join(problems) + "\n\n**Recommendations**: Consider imputation, dropping columns >50% missing, or using algorithms that handle missing values."
+        result = "⚠️ **Missing Data Analysis**:\n\n"
+        
+        if high_missing:
+            result += "🔴 **Critical Issues** (>20% missing):\n"
+            for col, info in list(high_missing.items())[:3]:
+                result += f"• **{col}**: {info.get('percentage', 0):.1f}% missing ({info.get('count', 0):,} values)\n"
+            result += "\n📋 **Action Required**: Consider dropping these columns or advanced imputation.\n\n"
+        
+        if moderate_missing:
+            result += "🟡 **Moderate Issues** (5-20% missing):\n"
+            for col, info in list(moderate_missing.items())[:3]:
+                result += f"• **{col}**: {info.get('percentage', 0):.1f}% missing ({info.get('count', 0):,} values)\n"
+            result += "\n📋 **Recommended**: Use mean/median imputation or predictive modeling.\n\n"
+            
+        if low_missing:
+            result += "🟢 **Minor Issues** (<5% missing):\n"
+            for col, info in list(low_missing.items())[:3]:
+                result += f"• **{col}**: {info.get('percentage', 0):.1f}% missing ({info.get('count', 0):,} values)\n"
+            result += "\n📋 **Solution**: Simple mean/mode imputation will work well.\n\n"
+            
+        result += f"**Overall**: {len(high_missing) + len(moderate_missing) + len(low_missing)}/{total_cols} columns affected. "
+        result += "Use pandas `fillna()`, sklearn `SimpleImputer`, or advanced techniques like KNN imputation."
+        
+        return result
     
-    # Correlation questions
-    if any(keyword in q_lower for keyword in ['correlation', 'correlate', 'relationship', 'related']):
+    # Correlation questions - enhanced with ML insights
+    if any(keyword in q_lower for keyword in ['correlation', 'correlate', 'relationship', 'related', 'feature']):
         corr = eda_results.get('correlation', {})
         if not corr:
-            return "📈 **Correlation Analysis**: Not available - need at least 2 numeric columns for correlation analysis."
+            return "📈 **Correlation Analysis**: Not available - requires at least 2 numeric columns. Upload dataset with numeric features for correlation insights."
         
-        # Find strong correlations
-        strong_corrs = []
+        # Find various correlation strengths
+        very_strong = []  # >0.9
+        strong_corrs = []  # 0.7-0.9
+        moderate_corrs = []  # 0.5-0.7
+        
         for col1, row in corr.items():
             for col2, val in row.items():
-                if col1 != col2 and abs(val) > 0.7:
-                    strong_corrs.append((col1, col2, val))
+                if col1 != col2 and abs(val) > 0.5:
+                    if abs(val) > 0.9:
+                        very_strong.append((col1, col2, val))
+                    elif abs(val) > 0.7:
+                        strong_corrs.append((col1, col2, val))
+                    else:
+                        moderate_corrs.append((col1, col2, val))
+        
+        result = "🔗 **Feature Correlation Analysis**:\n\n"
+        
+        if very_strong:
+            result += "🔴 **Very Strong Correlations** (|r| > 0.9) - **Multicollinearity Risk**:\n"
+            for col1, col2, val in very_strong[:3]:
+                result += f"• **{col1}** ↔ **{col2}**: {val:.3f}\n"
+            result += "⚠️ **ML Impact**: May cause overfitting. Consider feature selection/PCA.\n\n"
         
         if strong_corrs:
-            corr_text = "\n".join([f"• **{col1}** ↔ **{col2}**: {val:.2f}" for col1, col2, val in strong_corrs[:5]])
-            return f"🔗 **Strong Correlations Found**:\n{corr_text}\n\n**Note**: Consider feature selection or PCA for highly correlated features."
-        else:
-            return "📊 **Correlation Analysis**: No strong correlations found (|r| > 0.7). Features appear relatively independent."
+            result += "🟡 **Strong Correlations** (0.7 < |r| ≤ 0.9):\n"
+            for col1, col2, val in strong_corrs[:3]:
+                result += f"• **{col1}** ↔ **{col2}**: {val:.3f}\n"
+            result += "📊 **ML Insight**: These features carry similar information. Monitor for redundancy.\n\n"
+            
+        if moderate_corrs:
+            result += "🟢 **Moderate Correlations** (0.5 < |r| ≤ 0.7):\n"
+            for col1, col2, val in moderate_corrs[:3]:
+                result += f"• **{col1}** ↔ **{col2}**: {val:.3f}\n"
+            result += "✅ **Good Balance**: Useful relationships without excessive redundancy.\n\n"
+            
+        if not (very_strong or strong_corrs or moderate_corrs):
+            result += "✅ **Independent Features**: No strong correlations found (|r| > 0.5).\n"
+            result += "🎯 **ML Advantage**: Features provide unique information - excellent for modeling!\n\n"
+            
+        result += "💡 **Recommendation**: Use correlation matrix for feature engineering and selection."
+        return result
     
-    # Outliers questions
-    if any(keyword in q_lower for keyword in ['outlier', 'outliers', 'extreme', 'anomaly']):
+    # Outliers questions - comprehensive analysis
+    if any(keyword in q_lower for keyword in ['outlier', 'outliers', 'extreme', 'anomaly', 'anomalies']):
         numeric_summary = eda_results.get('numericalSummary', {})
-        outlier_cols = {col: info for col, info in numeric_summary.items() if info.get('outliers', 0) > 0}
+        outlier_analysis = []
         
-        if not outlier_cols:
-            return "✅ **Outlier Analysis**: No significant outliers detected using IQR method. Your data looks clean!"
+        for col, info in numeric_summary.items():
+            outlier_count = info.get('outliers', 0)
+            outlier_pct = info.get('outliersPercentage', 0)
+            if outlier_count > 0:
+                outlier_analysis.append((col, outlier_count, outlier_pct, info))
         
-        outlier_text = "\n".join([f"• **{col}**: {info['outliers']} outliers ({info['outliersPercentage']}%)" 
-                                 for col, info in list(outlier_cols.items())[:5]])
-        return f"⚠️ **Outliers Detected**:\n{outlier_text}\n\n**Suggestions**: Investigate outliers - they might be data entry errors or important edge cases."
+        if not outlier_analysis:
+            return "✅ **Clean Dataset**: No significant outliers detected using IQR method (Q1-1.5×IQR, Q3+1.5×IQR). Your data distribution looks healthy!"
+        
+        result = "🎯 **Outlier Analysis Report**:\n\n"
+        
+        # Categorize by severity
+        severe = [(col, count, pct, info) for col, count, pct, info in outlier_analysis if pct > 10]
+        moderate = [(col, count, pct, info) for col, count, pct, info in outlier_analysis if 3 < pct <= 10]
+        minor = [(col, count, pct, info) for col, count, pct, info in outlier_analysis if pct <= 3]
+        
+        if severe:
+            result += "🔴 **High Outlier Concentration** (>10%):\n"
+            for col, count, pct, info in severe:
+                result += f"• **{col}**: {count:,} outliers ({pct:.1f}%) - Range: {info.get('min', 'N/A')} to {info.get('max', 'N/A')}\n"
+            result += "⚠️ **Action**: Investigate data collection issues or consider robust algorithms.\n\n"
+            
+        if moderate:
+            result += "🟡 **Moderate Outliers** (3-10%):\n"
+            for col, count, pct, info in moderate:
+                result += f"• **{col}**: {count:,} outliers ({pct:.1f}%)\n"
+            result += "📊 **Options**: Cap values, transform data, or use outlier-robust models.\n\n"
+            
+        if minor:
+            result += "🟢 **Minor Outliers** (≤3%):\n"
+            for col, count, pct, info in minor:
+                result += f"• **{col}**: {count:,} outliers ({pct:.1f}%)\n"
+            result += "✅ **Normal**: Expected in real-world data. Monitor but likely keep.\n\n"
+            
+        result += "**ML Strategy**: Tree-based models handle outliers well. For linear models, consider preprocessing."
+        return result
     
-    # Data quality questions  
-    if any(keyword in q_lower for keyword in ['quality', 'clean', 'good', 'problems', 'issues']):
+    # Data quality questions - comprehensive assessment
+    if any(keyword in q_lower for keyword in ['quality', 'clean', 'good', 'problems', 'issues', 'health']):
         checks = eda_results.get('validationChecks', {})
-        quality = checks.get('dataQuality', 'Unknown')
-        missing_level = checks.get('missingDataLevel', 'Unknown')
-        samples = checks.get('sufficientSamples', 'Unknown')
+        shape = eda_results.get('shape', {})
+        rows, cols = shape.get('rows', 0), shape.get('columns', 0)
         
-        return f"""🔍 **Data Quality Assessment**:
-• **Overall Quality**: {quality}
-• **Missing Data Level**: {missing_level}
-• **Sample Size**: {samples}
-• **Data Integrity**: {'✅ Passed' if checks.get('hasData') and checks.get('hasColumns') else '❌ Issues found'}
+        # Calculate comprehensive quality score
+        missing_score = 100 - (sum(v.get('percentage', 0) for v in eda_results.get('missingValues', {}).values()) / max(1, cols))
+        size_score = min(100, (rows / 1000) * 50) if rows > 0 else 0
+        balance_score = 80 if 2 <= len(eda_results.get('numericColumns', [])) <= 50 else 40
+        
+        overall_score = (missing_score * 0.4 + size_score * 0.3 + balance_score * 0.3)
+        
+        result = f"🔍 **Comprehensive Data Quality Report**:\n\n"
+        result += f"📊 **Overall Quality Score: {overall_score:.1f}/100**\n\n"
+        
+        result += "**Component Analysis**:\n"
+        result += f"• **Data Completeness**: {missing_score:.1f}/100 {'✅' if missing_score > 80 else '⚠️' if missing_score > 60 else '❌'}\n"
+        result += f"• **Sample Size**: {size_score:.1f}/100 {'✅' if size_score > 40 else '⚠️' if size_score > 20 else '❌'}\n"
+        result += f"• **Feature Balance**: {balance_score:.1f}/100 {'✅' if balance_score > 60 else '⚠️'}\n\n"
+        
+        result += "**Detailed Assessment**:\n"
+        result += f"• **Rows**: {rows:,} {'(Good size)' if rows > 1000 else '(Consider more data)' if rows > 100 else '(Small sample)'}\n"
+        result += f"• **Features**: {cols} {'(Well-balanced)' if 5 <= cols <= 50 else '(Review feature count)'}\n"
+        result += f"• **Data Types**: {len(eda_results.get('numericColumns', []))} numeric, {len(eda_results.get('objectColumns', []))} categorical\n"
+        result += f"• **Missing Data**: {checks.get('missingDataLevel', 'Calculating...')}\n\n"
+        
+        if overall_score >= 80:
+            result += "🎉 **Excellent Quality**: Dataset is ready for advanced ML modeling!"
+        elif overall_score >= 60:
+            result += "👍 **Good Quality**: Minor preprocessing needed before modeling."
+        else:
+            result += "⚠️ **Needs Improvement**: Address data quality issues before modeling."
+            
+        return result
+            
+    # Model recommendation questions
+    if any(keyword in q_lower for keyword in ['model', 'algorithm', 'ml', 'machine learning', 'recommend']):
+        numeric_count = len(eda_results.get('numericColumns', []))
+        categorical_count = len(eda_results.get('objectColumns', []))
+        rows = eda_results.get('shape', {}).get('rows', 0)
+        
+        result = "🤖 **ML Model Recommendations**:\n\n"
+        
+        if rows < 100:
+            result += "⚠️ **Small Dataset** (<100 samples):\n• Simple models: Logistic Regression, Decision Trees\n• Avoid complex models to prevent overfitting\n\n"
+        elif rows < 1000:
+            result += "📊 **Medium Dataset** (100-1K samples):\n• **Best**: Random Forest, SVM, Gradient Boosting\n• **Avoid**: Deep Learning (insufficient data)\n\n"
+        else:
+            result += "🚀 **Large Dataset** (>1K samples):\n• **Excellent for**: XGBoost, LightGBM, Neural Networks\n• **Also consider**: Random Forest, SVM\n\n"
+        
+        if numeric_count > categorical_count * 3:
+            result += "🔢 **Numeric-Heavy Data**:\n• **Ideal**: Linear/Polynomial Regression, SVM\n• **Tree-based**: Random Forest, XGBoost\n\n"
+        elif categorical_count > numeric_count * 2:
+            result += "🏷️ **Categorical-Heavy Data**:\n• **Perfect**: Decision Trees, Random Forest\n• **Preprocessing**: OneHot/Label encoding + Linear models\n\n"
+        else:
+            result += "⚖️ **Balanced Data Types**:\n• **Universal**: Random Forest, XGBoost\n• **Linear**: After proper encoding\n\n"
+            
+        result += "💡 **Pro Tip**: Start with Random Forest for baseline, then try XGBoost for optimization!"
+        return result
+        
+    # Python code questions
+    if any(keyword in q_lower for keyword in ['python', 'code', 'implementation', 'script', 'pandas']):
+        return """💻 **Python Implementation Guide**:
 
-{'🎉 Your dataset looks ready for machine learning!' if quality == 'Good' and missing_level == 'Acceptable' else '⚠️ Consider data cleaning before modeling.'}"""
+📚 **Essential Libraries**:
+```python
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+```
+
+🔍 **Quick EDA Starter**:
+```python
+# Load and explore
+df = pd.read_csv('your_data.csv')
+print(f"Shape: {df.shape}")
+print(df.describe())
+print(df.isnull().sum())
+
+# Visualizations
+sns.heatmap(df.corr(), annot=True)
+plt.show()
+```
+
+🎯 **Model Training Template**:
+```python
+# Prepare data
+X = df.drop('target', axis=1)
+y = df['target']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+# Train model
+model = RandomForestClassifier()
+model.fit(X_train, y_train)
+accuracy = model.score(X_test, y_test)
+print(f"Accuracy: {accuracy:.3f}")
+```
+
+📊 **View detailed code examples on the main validation page!**"""
+    
+    # General intelligent response for other questions
+    return f"""🤔 **Analyzing your question**: "{question}"
+
+📊 **Based on your dataset**:
+• **{eda_results.get('shape', {}).get('rows', 0):,} rows** × **{eda_results.get('shape', {}).get('columns', 0)} features**
+• **Data types**: {len(eda_results.get('numericColumns', []))} numeric, {len(eda_results.get('objectColumns', []))} categorical
+
+💡 **I can help you with**:
+• Dataset overview and quality assessment
+• Missing data analysis and solutions
+• Feature correlations and relationships
+• Outlier detection and handling
+• ML model recommendations
+• Python code implementation
+
+🔍 **Try asking**: "What's the data quality?", "Show correlations", "Any outliers?", "Best models?", "Python code?"
+
+📈 **Pro tip**: Check the main validation page for comprehensive analysis results!"""
     
     # Distribution questions
     if any(keyword in q_lower for keyword in ['distribution', 'skew', 'normal', 'bell curve']):
