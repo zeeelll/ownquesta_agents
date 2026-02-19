@@ -152,6 +152,12 @@ for key, meta in AGENT_REGISTRY.items():
 # like 'validation_agent' or 'conversation_agent', so match by substring.
 conversation_router = next((r for k, r in agent_routers.items() if r is not None and 'conversation' in k), None)
 validation_router = next((r for k, r in agent_routers.items() if r is not None and 'validation' in k), None)
+# Convenience references for new agents
+manager_router = next((r for k, r in agent_routers.items() if r is not None and 'manager' in k), None)
+fp_router = next((r for k, r in agent_routers.items() if r is not None and ('fp' in k or 'feature' in k)), None)
+model_router = next((r for k, r in agent_routers.items() if r is not None and 'model' in k), None)
+moco_router = next((r for k, r in agent_routers.items() if r is not None and 'moco' in k), None)
+gen_router = next((r for k, r in agent_routers.items() if r is not None and 'gen' in k), None)
 
 # Create main FastAPI application
 app = FastAPI(
@@ -220,14 +226,19 @@ def health():
         "openai_max_tokens": openai_max_tokens_val,
         "openai_temperature": openai_temp_val,
         "allowed_origins": origins,
-        # Expose validation agent EDA capabilities when available
+        # Expose validation + pipeline/model capabilities when available
         "validation_agent_features": {
             "available": bool(validation_router),
             "supports_excel_upload": bool(validation_router),
             "provides_distribution_histograms": True,
             "provides_correlation_pairs": True,
             "provides_summary_and_info": True
-        }
+        },
+        "feature_agent_available": bool(fp_router),
+        "model_agent_available": bool(model_router),
+        "moco_agent_available": bool(moco_router),
+        "gen_agent_available": bool(gen_router),
+        "manager_agent_available": bool(manager_router)
     }
 
 
