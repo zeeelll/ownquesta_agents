@@ -13,67 +13,6 @@ class PipelineRequest(BaseModel):
     goal: Optional[Dict[str, Any]] = None
 
 
-@router.get("/ml_config")
-async def ml_config():
-    """Return ML configuration page layout describing preprocessing, modeling, and comparison steps.
-
-    This supplies a JSON structure the frontend can render as a three-step ML configuration UI:
-      1) Preprocessing & Feature Engineering
-      2) Model Creation, Training & Evaluation
-      3) Model Comparison & Selection
-    """
-    try:
-        layout = {
-            "status": "success",
-            "page": "ml_config",
-            "title": "Model Configuration",
-            "steps": [
-                {
-                    "step": 1,
-                    "id": "preprocessing",
-                    "title": "Preprocessing & Feature Engineering",
-                    "description": "Select target, choose imputers, scaling, encoding and feature selection strategies.",
-                    "fields": [
-                        {"name": "target_column", "type": "string", "label": "Target column"},
-                        {"name": "imputation_numeric", "type": "select", "label": "Numeric imputation", "options": ["median", "mean", "knn"]},
-                        {"name": "imputation_categorical", "type": "select", "label": "Categorical imputation", "options": ["most_frequent", "constant"]},
-                        {"name": "scaling", "type": "select", "label": "Scaling", "options": ["none", "standard", "minmax"]},
-                        {"name": "encoding", "type": "select", "label": "Categorical encoding", "options": ["one-hot", "ordinal", "target"]},
-                        {"name": "feature_selection", "type": "select", "label": "Feature selection", "options": ["none", "variance_threshold", "select_k_best", "pca"]}
-                    ]
-                },
-                {
-                    "step": 2,
-                    "id": "modeling",
-                    "title": "Model Creation, Training & Evaluation",
-                    "description": "Choose candidate algorithms, tuning strategy, cross-validation and evaluation metrics.",
-                    "fields": [
-                        {"name": "candidate_models", "type": "multiselect", "label": "Candidate models", "options": ["logistic_regression", "random_forest", "xgboost", "svm"]},
-                        {"name": "hyperparameter_search", "type": "select", "label": "Hyperparameter search", "options": ["none", "grid", "random", "bayes"]},
-                        {"name": "cv_folds", "type": "number", "label": "CV folds", "default": 5},
-                        {"name": "metrics", "type": "multiselect", "label": "Evaluation metrics", "options": ["accuracy", "f1", "roc_auc", "precision", "recall"]}
-                    ]
-                },
-                {
-                    "step": 3,
-                    "id": "comparison",
-                    "title": "Model Comparison & Selection",
-                    "description": "Compare trained models by selected metrics, inspect feature importance and choose the best model to deploy.",
-                    "fields": [
-                        {"name": "compare_by", "type": "select", "label": "Compare by", "options": ["accuracy", "f1", "roc_auc"]},
-                        {"name": "explainability", "type": "select", "label": "Explainability", "options": ["shap", "lime", "none"]},
-                        {"name": "deploy_options", "type": "multiselect", "label": "Deploy options", "options": ["docker", "sagemaker", "download"]}
-                    ]
-                }
-            ]
-        }
-
-        return layout
-    except Exception as e:
-        logger.exception("Failed to build ml_config layout: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/run_pipeline")
 async def run_pipeline(req: PipelineRequest):
     """Run the full pipeline: validation -> fp -> model training -> compare -> explain.
