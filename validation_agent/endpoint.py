@@ -276,8 +276,32 @@ async def ask_question(req: AskRequest):
         # Run EDA to build context
         eda_result = perform_advanced_eda_from_csv_text(req.csv_text, goal=req.goal or {})
         # Use rule-based/question analyzer (or AI if configured)
-        answer = analyze_user_question(req.question, eda_result)
-        return {"status": "success", "answer": answer, "eda": eda_result}
+        answer_dict = analyze_user_question(req.question, eda_result)
+        
+        # Handle both dict and string responses for backwards compatibility
+        if isinstance(answer_dict, dict):
+            concise_answer = answer_dict.get('concise', answer_dict.get('detailed', 'Analysis complete.'))
+            detailed_answer = answer_dict.get('detailed', answer_dict.get('concise', 'Check results for details.'))
+            code_section = answer_dict.get('code_section')  # Pass through code section if present
+        else:
+            # Fallback for string responses
+            concise_answer = "Analysis complete. Check results for details."
+            detailed_answer = str(answer_dict)
+            code_section = None
+        
+        response = {
+            "status": "success", 
+            "answer": concise_answer,  # Short answer for compatibility
+            "concise": concise_answer,
+            "detailed": detailed_answer,
+            "eda": eda_result
+        }
+        
+        # Include code_section if backend wants to trigger code display
+        if code_section:
+            response["code_section"] = code_section
+        
+        return response
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -286,10 +310,33 @@ async def ask_question(req: AskRequest):
 
 @router.post("/question")
 async def question_endpoint(req: QuestionRequest):
-    """Accept a question plus existing EDA results and return an answer."""
+    """Accept a question plus existing EDA results and return both concise and detailed answers."""
     try:
-        answer = analyze_user_question(req.question, req.eda_results)
-        return {"status": "success", "answer": answer}
+        answer_dict = analyze_user_question(req.question, req.eda_results)
+        
+        # Handle both dict and string responses for backwards compatibility
+        if isinstance(answer_dict, dict):
+            concise_answer = answer_dict.get('concise', answer_dict.get('detailed', 'Analysis complete.'))
+            detailed_answer = answer_dict.get('detailed', answer_dict.get('concise', 'Check main page for details.'))
+            code_section = answer_dict.get('code_section')  # Pass through code section if present
+        else:
+            # Fallback for string responses - create concise version
+            concise_answer = "Analysis complete. Check the main page for detailed results."
+            detailed_answer = str(answer_dict)
+            code_section = None
+        
+        response = {
+            "status": "success", 
+            "answer": concise_answer,  # Short answer for chatbot
+            "concise": concise_answer,
+            "detailed": detailed_answer  # Full answer for main page
+        }
+        
+        # Include code_section if backend wants to trigger code display
+        if code_section:
+            response["code_section"] = code_section
+        
+        return response
     except Exception as e:
         import traceback
         traceback.print_exc()
