@@ -282,12 +282,22 @@ for key, router in agent_routers.items():
     if router is not None:
         try:
             meta = AGENT_REGISTRY[key]
+            # Register router at its canonical prefix (e.g., /moco)
             app.include_router(
                 router,
                 prefix=meta["prefix"],
                 tags=[meta["name"]],
             )
             logger.info(f"{meta['name']} registered at {meta['prefix']}")
+
+            # Backwards-compat: also register under the folder key (e.g., /moco_agent)
+            alt_prefix = f"/{key}"
+            if alt_prefix != meta["prefix"]:
+                try:
+                    app.include_router(router, prefix=alt_prefix, tags=[f"{meta['name']} (alt)"])
+                    logger.info(f"{meta['name']} additionally registered at {alt_prefix} for compatibility")
+                except Exception as e:
+                    logger.warning(f"Could not register alternate prefix {alt_prefix} for {key}: {e}")
         except Exception as e:
             logger.exception(f"Failed to register {key} router: %s", e)
 
