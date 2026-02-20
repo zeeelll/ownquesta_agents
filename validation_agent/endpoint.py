@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, Union
+# validation agent helpers
 from .config import perform_advanced_eda_from_csv_text, analyze_user_question, perform_ml_validation_from_eda, generate_ai_insights, generate_ml_ai_insights
+# Import FP agent processing to run preprocessing automatically after validation
+from fp_agent.endpoint import process_features as fp_process, FPRequest as FPRequestModel
 import json
 import base64
 from pathlib import Path
@@ -107,16 +110,24 @@ async def analyze_csv(req: ValidationRequest):
         except Exception as e:
             user_view_report = None
 
-        response_data = {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
-        print(f"DEBUG: Response data created, size: {len(str(response_data))}")
-        # Expose convenient top-level aliases for UI clients
-        response_data.update({
+        response = {"status": "success", "result": result, "eda_result": result, "ml_result": ml_result, "agent_answer": agent_answer, "user_view_report": user_view_report}
+        response.update({
             'summary': result.get('summary'),
             'info': result.get('info'),
             'correlationPairs': result.get('correlationPairs'),
             'numericalSummary': result.get('numericalSummary')
         })
-        return response_data
+
+        # Attempt to run FP processing automatically and attach to response
+        try:
+            csv_text = data_input if isinstance(data_input, str) else None
+            fp_req = FPRequestModel(eda_result=result, csv_text=csv_text, goal=req.goal or {})
+            fp_res = await fp_process(fp_req)
+            response['preprocessing'] = fp_res
+        except Exception as e:
+            response['preprocessing'] = {'status': 'error', 'message': str(e)}
+
+        return response
     except Exception as e:
         print(f"DEBUG: Error in analyze_csv: {e}")
         import traceback
@@ -157,7 +168,7 @@ async def ml_validate(req: ValidationRequest):
         # Build lightweight report
         report = f"Dataset: {eda_result.get('shape', {}).get('rows', 'N/A')} rows × {eda_result.get('shape', {}).get('columns', 'N/A')} columns."
 
-        return {
+        response = {
             "status": "success",
             "eda_result": eda_result,
             "ml_result": ml_result,
@@ -168,6 +179,16 @@ async def ml_validate(req: ValidationRequest):
             "correlationPairs": eda_result.get('correlationPairs'),
             "numericalSummary": eda_result.get('numericalSummary')
         }
+
+        # Run FP agent to automatically produce preprocessing suggestions
+        try:
+            fp_req = FPRequestModel(eda_result=eda_result, csv_text=None, goal=req.goal or {})
+            fp_res = await fp_process(fp_req)
+            response['preprocessing'] = fp_res
+        except Exception as e:
+            response['preprocessing'] = {'status': 'error', 'message': str(e)}
+
+        return response
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -246,6 +267,15 @@ async def validate_upload(file: UploadFile = File(...), goal: Optional[str] = Fo
             'correlationPairs': result.get('correlationPairs'),
             'numericalSummary': result.get('numericalSummary')
         })
+        # Attempt to run FP processing automatically and attach to response
+        try:
+            csv_text = parsed_input if isinstance(parsed_input, str) else None
+            fp_req = FPRequestModel(eda_result=result, csv_text=csv_text, goal=parsed_goal or {})
+            fp_res = await fp_process(fp_req)
+            response['preprocessing'] = fp_res
+        except Exception as e:
+            response['preprocessing'] = {'status': 'error', 'message': str(e)}
+
         return response
     except Exception as e:
         raise HTTPException(
