@@ -1,24 +1,22 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import importlib
+import importlib.util
 import logging
 import os
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-import os
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-# Expose a few optional runtime settings via environment variables
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_MAX_TOKENS = os.getenv('OPENAI_MAX_TOKENS') or os.getenv('MAX_TOKENS')
 OPENAI_TEMPERATURE = os.getenv('OPENAI_TEMPERATURE') or os.getenv('TEMPERATURE')
 
-# Configure allowed frontend origins for CORS via env `FRONTEND_ORIGINS` (comma-separated)
 _default_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -34,12 +32,12 @@ if frontend_origins_env:
 else:
     origins = _default_origins
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("ownquesta_agents")
+
 
 def _is_number(value: str) -> bool:
     try:
@@ -48,29 +46,19 @@ def _is_number(value: str) -> bool:
     except Exception:
         return False
 
+
 def try_import_router(module_path: str, attr: str = "router") -> Optional[object]:
-    """
-    Safely import router modules with proper error handling
-    
-    Args:
-        module_path: Python module path to import
-        attr: Attribute name to get from module (default: "router")
-        
-    Returns:
-        Router object if successful, None otherwise
-    """
     try:
         mod = importlib.import_module(module_path)
     except ImportError as e:
         logger.warning(f"Router module import failed: {module_path} - {e}")
-        # Fallback: attempt to load module by file path (useful when running from different CWDs)
         try:
-            module_file = Path(__file__).parent / (module_path + ".py")
+            module_file = Path(__file__).parent / (module_path.replace(".", "/") + ".py")
             if module_file.exists():
                 spec = importlib.util.spec_from_file_location(module_path, str(module_file))
                 if spec and spec.loader:
                     mod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(mod)  # type: ignore
+                    spec.loader.exec_module(mod)
                     logger.info(f"Loaded router module from file: {module_file}")
                 else:
                     logger.warning(f"Could not create spec for module file: {module_file}")
@@ -90,85 +78,78 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
         logger.warning(f"Module '{module_path}' does not expose attribute '{attr}'")
         return None
 
-    # Basic validation: ensure the object exposes 'routes' (APIRouter-compatible)
-    try:
-        if not hasattr(router, "routes"):
-            logger.error(f"Imported attribute '{attr}' from {module_path}' is not a valid router (missing 'routes')")
-            return None
-    except Exception as e:
-        logger.error(f"Error validating router from {module_path}: %s", e)
+    if not hasattr(router, "routes"):
+        logger.error(f"Imported attribute '{attr}' from '{module_path}' is not a valid router")
         return None
 
     logger.info(f"Successfully loaded router: {module_path}.{attr}")
     return router
 
-# Agent registry and controlled loading - dynamically discovered
-from pathlib import Path
 
-def discover_agents():
-    """Dynamically discover available agents in the agents directory."""
-    agents_dir = Path(__file__).parent
-    agent_registry = {}
-    
-    for item in agents_dir.iterdir():
-        if item.is_dir() and not item.name.startswith('.') and item.name not in ['__pycache__', 'data', 'scripts']:
-            endpoint_file = item / 'endpoint.py'
-            if endpoint_file.exists():
-                key = item.name
-                # Use the part before '_agent' if present, else the name
-                prefix_name = item.name.replace('_agent', '') if '_agent' in item.name else item.name
-                agent_registry[key] = {
-                    "module": f"{item.name}.endpoint",
-                    "attr": "router",
-                    "prefix": f"/{prefix_name}",
-                    "name": f"{prefix_name.replace('_', ' ').title()} Agent"
-                }
-                logger.info(f"Discovered agent: {key} at {item.name}")
-    
-    return agent_registry
+# ─────────────────────────────────────────────
+# AGENT REGISTRY — Only the 6 active agents
+# ─────────────────────────────────────────────
+AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
+    "conversation_agent": {
+        "module": "conversation_agent.endpoint",
+        "prefix": "/conversation",
+        "name": "Conversation Agent",
+    },
+    "manager_agent": {
+        "module": "manager_agent.endpoint",
+        "prefix": "/manager",
+        "name": "Manager Agent",
+    },
+    "validation_agent": {
+        "module": "validation_agent.endpoint",
+        "prefix": "/validation",
+        "name": "Validation Agent",
+    },
+    "fp_agent": {
+        "module": "fp_agent.endpoint",
+        "prefix": "/fp",
+        "name": "FP Agent",
+    },
+    "model_agent": {
+        "module": "model_agent.endpoint",
+        "prefix": "/model",
+        "name": "Model Agent",
+    },
+    "moco_agent": {
+        "module": "moco_agent.endpoint",
+        "prefix": "/moco",
+        "name": "Moco Agent",
+    },
+}
 
-AGENT_REGISTRY = discover_agents()
-
-# Read ENABLED_AGENTS from environment (comma-separated keys from AGENT_REGISTRY)
-enabled_env = os.getenv("ENABLED_AGENTS")
-if enabled_env:
-    enabled_keys = {k.strip() for k in enabled_env.split(",") if k.strip()}
-    logger.info("ENABLED_AGENTS set; attempting to load: %s", enabled_keys)
-else:
-    enabled_keys = set(AGENT_REGISTRY.keys())
-    logger.info("Loading optional router modules... (all enabled)")
-
-# Attempt to import configured agents
+# Load all agent routers
 agent_routers: Dict[str, Optional[object]] = {}
 for key, meta in AGENT_REGISTRY.items():
-    if key not in enabled_keys:
-        agent_routers[key] = None
-        logger.info("Skipping agent '%s' (disabled by ENABLED_AGENTS)", key)
-        continue
-    agent_routers[key] = try_import_router(meta["module"], meta.get("attr", "router"))
+    agent_routers[key] = try_import_router(meta["module"])
 
-# Expose variables used elsewhere for backwards compatibility
-# Map commonly-used agent keys to discovered routers. discovery uses folder names
-# like 'validation_agent' or 'conversation_agent', so match by substring.
-conversation_router = next((r for k, r in agent_routers.items() if r is not None and 'conversation' in k), None)
-validation_router = next((r for k, r in agent_routers.items() if r is not None and 'validation' in k), None)
-# Convenience references for new agents
-manager_router = next((r for k, r in agent_routers.items() if r is not None and 'manager' in k), None)
-fp_router = next((r for k, r in agent_routers.items() if r is not None and ('fp' in k or 'feature' in k)), None)
-model_router = next((r for k, r in agent_routers.items() if r is not None and 'model' in k), None)
-moco_router = next((r for k, r in agent_routers.items() if r is not None and 'moco' in k), None)
-gen_router = next((r for k, r in agent_routers.items() if r is not None and 'gen' in k), None)
+# ─────────────────────────────────────────────
+# QUESTA AGENT — Loaded separately
+# The router already has prefix="/questa" in endpoint.py
+# So we include it WITHOUT adding a prefix here
+# ─────────────────────────────────────────────
+questa_router = try_import_router("questa_agent.endpoint", "router")
+if questa_router:
+    logger.info("✅  Questa AI Agent loaded successfully")
+else:
+    logger.warning("⚠️  Questa AI Agent not available — ensure questa_agent/ folder exists with endpoint.py and config.py")
 
-# Create main FastAPI application
+
+# ─────────────────────────────────────────────
+# FASTAPI APP
+# ─────────────────────────────────────────────
 app = FastAPI(
     title="OwnQuesta Agent API",
-    description="AI-powered machine learning platform APIs including advanced ML validation with comprehensive EDA (shape, size, statistical summaries, data distribution, correlations, insights), conversation agents, and comprehensive ML assistance",
+    description="AI-powered machine learning platform APIs.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -178,9 +159,18 @@ app.add_middleware(
 )
 
 
+def get_available_agents() -> List[Dict[str, Any]]:
+    agents: List[Dict[str, Any]] = []
+    for key, meta in AGENT_REGISTRY.items():
+        if agent_routers.get(key):
+            agents.append({"name": meta["name"], "prefix": meta["prefix"]})
+    if questa_router:
+        agents.append({"name": "Questa AI Assistant", "prefix": "/questa"})
+    return agents
+
+
 @app.get("/")
 def root():
-    """Root endpoint with API information"""
     return {
         "message": "Welcome to OwnQuesta Agent API",
         "version": "1.0.0",
@@ -192,81 +182,33 @@ def root():
 
 @app.get("/health")
 def health():
-    """Comprehensive health check for all agents"""
-    agent_status = {}
-
-    # Check all discovered agents
-    for key, router in agent_routers.items():
-        agent_status[key] = "available" if router else "unavailable"
-
-    overall_status = "ok" if any(status == "available" for status in agent_status.values()) else "degraded"
-
-    openai_max_tokens_val = None
-    if OPENAI_MAX_TOKENS:
-        try:
-            openai_max_tokens_val = int(OPENAI_MAX_TOKENS)
-        except Exception:
-            openai_max_tokens_val = OPENAI_MAX_TOKENS
-
-    openai_temp_val = None
-    if OPENAI_TEMPERATURE and _is_number(OPENAI_TEMPERATURE):
-        try:
-            openai_temp_val = float(OPENAI_TEMPERATURE)
-        except Exception:
-            openai_temp_val = OPENAI_TEMPERATURE
-    else:
-        openai_temp_val = OPENAI_TEMPERATURE
+    agent_status = {key: ("available" if r else "unavailable") for key, r in agent_routers.items()}
+    agent_status["questa_agent"] = "available" if questa_router else "unavailable"
+    overall = "ok" if any(v == "available" for v in agent_status.values()) else "degraded"
 
     return {
-        "status": overall_status,
+        "status": overall,
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "agents": agent_status,
         "version": "1.0.0",
         "openai_configured": bool(OPENAI_API_KEY),
-        "openai_max_tokens": openai_max_tokens_val,
-        "openai_temperature": openai_temp_val,
-        "allowed_origins": origins,
-        # Expose validation + pipeline/model capabilities when available
-        "validation_agent_features": {
-            "available": bool(validation_router),
-            "supports_excel_upload": bool(validation_router),
-            "provides_distribution_histograms": True,
-            "provides_correlation_pairs": True,
-            "provides_summary_and_info": True
-        },
-        "feature_agent_available": bool(fp_router),
-        "model_agent_available": bool(model_router),
-        "moco_agent_available": bool(moco_router),
-        "gen_agent_available": bool(gen_router),
-        "manager_agent_available": bool(manager_router)
+        "questa_agent_available": bool(questa_router),
+        "questa_endpoints": {
+            "chat":   "POST /questa/chat",
+            "info":   "GET  /questa/info",
+            "health": "GET  /questa/health",
+        } if questa_router else None,
     }
-
-
-def get_available_agents() -> List[Dict[str, Any]]:
-    """Get list of available agent endpoints"""
-    agents: List[Dict[str, Any]] = []
-    
-    for key, meta in AGENT_REGISTRY.items():
-        if key in enabled_keys and agent_routers.get(key):
-            agents.append({
-                "name": meta["name"],
-                "prefix": meta["prefix"],
-                "description": f"AI-powered {meta['name'].lower()} for advanced ML workflows"
-            })
-    
-    return agents
 
 
 @app.get("/meta.json")
 def meta():
-    """Legacy metadata endpoint for frontend compatibility"""
     endpoints = ["/", "/health", "/meta.json"]
-    
-    # Add available agent endpoints
     for key, router in agent_routers.items():
         if router:
             endpoints.append(AGENT_REGISTRY[key]["prefix"])
-    
+    if questa_router:
+        endpoints.extend(["/questa/chat", "/questa/info", "/questa/health"])
     return {
         "name": "ownquesta-agent-api",
         "version": "1.0.0",
@@ -276,41 +218,41 @@ def meta():
     }
 
 
-# Include routers for available agents (safe registration)
+# ─────────────────────────────────────────────
+# REGISTER AGENT ROUTERS
+# ─────────────────────────────────────────────
 logger.info("Registering available agent routers...")
 for key, router in agent_routers.items():
     if router is not None:
-        try:
-            meta = AGENT_REGISTRY[key]
-            # Register router at its canonical prefix (e.g., /moco)
-            app.include_router(
-                router,
-                prefix=meta["prefix"],
-                tags=[meta["name"]],
-            )
-            logger.info(f"{meta['name']} registered at {meta['prefix']}")
+        meta = AGENT_REGISTRY[key]
+        app.include_router(router, prefix=meta["prefix"], tags=[meta["name"]])
+        logger.info(f"{meta['name']} registered at {meta['prefix']}")
 
-            # Backwards-compat: also register under the folder key (e.g., /moco_agent)
-            alt_prefix = f"/{key}"
-            if alt_prefix != meta["prefix"]:
-                try:
-                    app.include_router(router, prefix=alt_prefix, tags=[f"{meta['name']} (alt)"])
-                    logger.info(f"{meta['name']} additionally registered at {alt_prefix} for compatibility")
-                except Exception as e:
-                    logger.warning(f"Could not register alternate prefix {alt_prefix} for {key}: {e}")
-        except Exception as e:
-            logger.exception(f"Failed to register {key} router: %s", e)
+# ─────────────────────────────────────────────
+# REGISTER QUESTA ROUTER
+# NOTE: No prefix here — endpoint.py already declares prefix="/questa"
+# ─────────────────────────────────────────────
+if questa_router is not None:
+    try:
+        app.include_router(questa_router)  # ← No prefix! Already set in endpoint.py
+        logger.info("✅  Questa AI Assistant registered at /questa")
+    except Exception as e:
+        logger.exception(f"Failed to register Questa router: {e}")
+else:
+    logger.warning("⚠️  Questa AI Agent router not registered — agent unavailable")
 
-# Log startup summary
-total_agents = sum(router is not None for router in agent_routers.values())
 
-# Add startup event
 @app.on_event("startup")
 async def startup_event():
-    logger.info("OwnQuesta Agent API is starting up...")
-    logger.info(f"Available agents: {[agent['name'] for agent in get_available_agents()]}")
+    logger.info("=" * 55)
+    logger.info("  OwnQuesta Agent API Starting Up")
+    logger.info("=" * 55)
+    logger.info(f"Available agents: {[a['name'] for a in get_available_agents()]}")
+    logger.info(f"OpenAI configured: {bool(OPENAI_API_KEY)}")
+    logger.info(f"Questa AI Agent:   {'✅ Active' if questa_router else '❌ Unavailable'}")
+    logger.info("=" * 55)
 
-# Add shutdown event  
+
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("OwnQuesta Agent API is shutting down...")
