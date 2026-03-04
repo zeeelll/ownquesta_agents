@@ -60,6 +60,15 @@ When analysing a dataset you always:
   • Spot quality issues (nulls, skew, cardinality)
   • Propose feature-engineering steps and write clean Python code for them
   • Recommend the top 3 scikit-learn models with clear reasoning
+
+CRITICAL — always use these modern API patterns in feature_engineering_code:
+  • OneHotEncoder: use sparse_output=False  (NOT sparse=False — removed in sklearn 1.2)
+  • DataFrame merge/combine: use pd.concat([...])  (NOT DataFrame.append() — removed in pandas 2.0)
+  • fillna with numeric value on object columns: cast first, e.g. df[col].astype(float).fillna(0)
+  • LabelEncoder: fit on df[col].astype(str) to avoid mixed-type issues
+  • The feature_engineering_code must be a complete, runnable Python script from the very first line.
+    Define ALL variables at the top — never reference a variable before it is defined.
+    End with a print() confirming the result shape, e.g. print('FE done. Shape:', df_processed.shape)
 """
 
 _ANALYSIS_USER = """\
@@ -106,6 +115,14 @@ Always use seaborn with dark theme for any visualisation:
   plt.style.use('dark_background')
   plt.rcParams.update({{'figure.facecolor':'#0d1117','axes.facecolor':'#161b22','text.color':'#e6edf3','axes.labelcolor':'#8b949e','xtick.color':'#8b949e','ytick.color':'#8b949e'}})
 Never call plt.show() — the backend captures figures automatically.
+
+CRITICAL chart quality rules for pipeline visualisations:
+  • Confusion matrix: ALWAYS use cmap='Blues', annot=True, fmt='d'.
+    Add plt.xlabel('Predicted Label'), plt.ylabel('True Label'), plt.title('Confusion Matrix'), plt.tight_layout().
+  • Residual plot: use alpha=0.5, add a horizontal line at y=0 with plt.axhline(0, color='red', linestyle='--').
+    Label axes (Predicted vs Residuals) and add a title.
+  • Every chart must have a descriptive plt.title() and axis labels. Call plt.tight_layout() before the end of each cell.
+  • After each visualisation, print() a 1–2 sentence insight about what the chart reveals.
 """
 
 _PIPELINE_USER = """\
@@ -199,16 +216,30 @@ Known API changes to fix automatically:
   - pandas >= 2.0: DataFrame.append() removed → use pd.concat()
   - pandas >= 2.0: fillna() with numeric value on object column needs explicit cast
   - matplotlib: plt.show() must never be called (backend captures automatically)
+  - NameError on a variable: it was likely defined earlier in the code — check whether the entire
+    original code was preserved and whether the variable definition is still present
 
-Rules:
-  • Fix ONLY the broken part — keep everything else identical
-  • The fixed code must be complete and self-contained (all imports included)
-  • Notebook globals already in scope: df, df_processed, model, X_train, X_test, y_train, y_test, etc.
+CRITICAL rules for fixed_code:
+  • fixed_code MUST be the ENTIRE original code cell from the very first line to the very last line.
+    Do NOT truncate, shorten, or start from the middle. Copy the whole original code first,
+    then apply only the minimal targeted change to fix the specific error.
+  • Every variable used anywhere in the code must be defined earlier in the same fixed_code block.
+  • All imports must be at the top of fixed_code — never omit them.
+  • NEVER re-read the CSV/Excel file using pd.read_csv() or pd.read_excel() with just the bare
+    filename (e.g. 'data.csv'). The dataset is already loaded into the notebook global `df`.
+    If you absolutely must reload (e.g. to fix a FileNotFoundError), use the full file_path
+    from the ML pipeline context JSON, not just the filename.
+  • If the error is NameError for df_processed: recreate it from `df` using simple pandas ops
+    (e.g. df_processed = df.copy()) so later cells can continue. Do NOT try to re-read any file.
+  • If the error is NameError for X_train / X_test / y_train / y_test: they depend on
+    df_processed existing. Add df_processed = df.copy() before the train_test_split line.
+  • Notebook globals already in scope (do NOT redefine them unless needed): df, df_processed,
+    model, X_train, X_test, y_train, y_test, etc.
   • If the error is truly obscure and you need up-to-date web information, set needs_search=true
 
 Respond ONLY with valid JSON — no prose before or after:
 {{
-  "fixed_code": "<complete corrected Python>",
+  "fixed_code": "<COMPLETE corrected Python — full cell, not a partial snippet>",
   "explanation": "<1–2 sentences: root cause and what was changed>",
   "needs_search": false,
   "search_query": "<web search query — only populate if needs_search is true>"
@@ -253,14 +284,27 @@ Each cell MUST:
       plt.style.use('dark_background')
       plt.rcParams.update({{'figure.facecolor':'#0d1117','axes.facecolor':'#161b22','text.color':'#e6edf3','axes.labelcolor':'#8b949e','xtick.color':'#8b949e','ytick.color':'#8b949e'}})
   • Never call plt.show()
-  • Always print() a summary of what the chart/analysis reveals
+  • Always print() a 1-2 sentence insight about what the chart or analysis reveals
   • Be self-contained (all imports at the top of each cell)
+  • Every chart MUST have plt.title(), appropriate axis labels, and plt.tight_layout()
+
+CRITICAL chart quality rules — ALWAYS apply these before generating any chart:
+  1. Missing-value heatmap: ONLY generate if df.isnull().sum().sum() > 0.
+     If the dataset has NO missing values, skip the plot entirely and instead print:
+     "✅ No missing values found in this dataset — no imputation required."
+  2. Correlation heatmap: ALWAYS use numeric columns only (df.select_dtypes(include='number')).
+     ALWAYS specify cmap='coolwarm', vmin=-1, vmax=1, center=0, annot=True, fmt='.2f', linewidths=0.5.
+     This ensures the colour scale always spans the full -1 to +1 range — never a single flat colour.
+  3. Before generating ANY chart, verify the plotted data has meaningful variance.
+     If all values are identical (e.g. std == 0), skip the plot and print a descriptive message instead.
+  4. Target distribution: for classification use countplot; for regression use histplot with kde=True.
+     Always label axes and add a title.
 
 Focus on:
   1. Distribution of the target variable
-  2. Correlation heatmap for numeric columns
+  2. Correlation heatmap for numeric columns (with the quality rules above)
   3. Top feature distributions or box-plots by target
-  4. Missing-value heatmap (if relevant)
+  4. Missing-value summary (heatmap only if nulls exist, otherwise print the ✅ message)
 
 Respond ONLY with valid JSON — no prose before or after.
 """
@@ -320,7 +364,7 @@ class MLAgent:
     def _ctx_str(self, context: dict) -> str:
         return json.dumps(
             {k: context.get(k) for k in
-             ["filename", "problem_type", "target_column", "stage", "dataset_summary"]},
+             ["filename", "file_path", "problem_type", "target_column", "stage", "dataset_summary"]},
             ensure_ascii=False,
         )
 

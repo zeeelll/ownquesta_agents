@@ -36,7 +36,7 @@ agent_states: dict[str, MLState] = {}
 v2_sessions:  dict[str, dict]    = {}
 
 LAB_BACKEND     = "http://localhost:8010"
-MAX_FIX_ATTEMPTS = 2   # guard retry budget per failing cell
+MAX_FIX_ATTEMPTS = 3   # guard retry budget per failing cell
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -297,6 +297,7 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
             if fe_err:
                 ctx = {
                     "filename": req.uploaded_filename,
+                    "file_path": req.uploaded_file_path,
                     "problem_type": result.get("problem_type", "unknown"),
                     "target_column": result.get("target_column") or req.target_column or "",
                     "stage": "feature_engineering",
@@ -333,6 +334,7 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
                 if eda_err:
                     ctx = {
                         "filename": req.uploaded_filename,
+                        "file_path": req.uploaded_file_path,
                         "problem_type": result.get("problem_type", "unknown"),
                         "target_column": result.get("target_column") or req.target_column or "",
                         "stage": "eda",
