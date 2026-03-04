@@ -3,11 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import importlib
 import logging
 import os
+import asyncio
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+
+from services import start_services, stop_services
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / ".env"
@@ -299,8 +302,12 @@ total_agents = sum(router is not None for router in agent_routers.values())
 async def startup_event():
     logger.info("OwnQuesta Agent API is starting up...")
     logger.info(f"Available agents: {[agent['name'] for agent in get_available_agents()]}")
+    # Start lab-backend and lab-agent as sub-processes (runs in a thread so
+    # blocking health-check polls don't stall the asyncio event loop).
+    await asyncio.to_thread(start_services)
 
-# Add shutdown event  
+# Add shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("OwnQuesta Agent API is shutting down...")
+    stop_services()
