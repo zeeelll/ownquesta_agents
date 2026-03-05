@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 
 # ── JSON extraction ───────────────────────────────────────────────────────────
@@ -340,26 +340,41 @@ Return EXACTLY:
 # ── Agent class ───────────────────────────────────────────────────────────────
 
 class MLAgent:
-    """OpenAI chat completions wrapper for every lab-agent role."""
+    """OpenAI / Anthropic chat completions wrapper for every lab-agent role."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
-        from openai import OpenAI
-        self.client = OpenAI(api_key=api_key)
-        self.model = model
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", provider: str = "openai"):
+        self.model    = model
+        self.provider = provider
+        self.client: Any
+        if provider == "anthropic":
+            from anthropic import Anthropic
+            self.client = Anthropic(api_key=api_key)
+        else:
+            from openai import OpenAI
+            self.client = OpenAI(api_key=api_key)
 
     # ── private helpers ───────────────────────────────────────────────────────
 
     def _complete(self, system: str, user: str, max_tokens: int = 3000) -> str:
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
-            max_tokens=max_tokens,
-            temperature=0.2,
-        )
-        return resp.choices[0].message.content or ""
+        if self.provider == "anthropic":
+            resp = self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            return resp.content[0].text if resp.content else ""
+        else:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+                max_tokens=max_tokens,
+                temperature=0.2,
+            )
+            return resp.choices[0].message.content or ""
 
     def _ctx_str(self, context: dict) -> str:
         return json.dumps(
@@ -454,13 +469,27 @@ class MLAgent:
             messages.append({"role": m["role"], "content": m["content"]})
         messages.append({"role": "user", "content": message})
 
-        resp = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=900,
-            temperature=0.3,
-        )
-        raw = resp.choices[0].message.content or ""
+        if self.provider == "anthropic":
+            # Extract system message, keep only user/assistant turns
+            sys_content = next(
+                (m["content"] for m in messages if m["role"] == "system"), system
+            )
+            user_messages = [m for m in messages if m["role"] != "system"]
+            resp = self.client.messages.create(
+                model=self.model,
+                max_tokens=900,
+                system=sys_content,
+                messages=user_messages,
+            )
+            raw = resp.content[0].text if resp.content else ""
+        else:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=900,
+                temperature=0.3,
+            )
+            raw = resp.choices[0].message.content or ""
         try:
             return _extract_json(raw)
         except ValueError:

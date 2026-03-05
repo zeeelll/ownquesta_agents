@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Generator
-import os
+import os   
 import uuid
 import json
 import logging
@@ -17,6 +17,7 @@ import httpx
 from state import MLState
 from graph import step_graph
 from agents import MLAgent
+from models_config import get_available_models, resolve_model, get_api_key
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Lab Agent", version="4.0.0")
@@ -56,14 +57,13 @@ def _exec(session_id: str, code: str) -> tuple[str, str | None, list[str]]:
         return "", str(exc), []
 
 
-def _get_agent() -> MLAgent:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        raise HTTPException(
-            status_code=503,
-            detail="OPENAI_API_KEY not set. Create lab-agent/.env with OPENAI_API_KEY=sk-...",
-        )
-    return MLAgent(api_key=key)
+def _get_agent(model_id: Optional[str] = None) -> MLAgent:
+    try:
+        cfg = resolve_model(model_id)
+        key = get_api_key(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return MLAgent(api_key=key, model=cfg["model_name"], provider=cfg["provider"])
 
 
 def _profile_code(file_path: str, filename: str) -> str:
@@ -228,19 +228,23 @@ class V2AnalyzeRequest(BaseModel):
     uploaded_file_path: str
     uploaded_filename: str
     target_column: Optional[str] = None
+    model_id: Optional[str] = None
 
 class V2BuildPipelineRequest(BaseModel):
     session_id: str
     selected_model: str
     target_column: Optional[str] = None
+    model_id: Optional[str] = None
 
 class V2ChatRequest(BaseModel):
     session_id: str
     message: str
+    model_id: Optional[str] = None
 
 class V2PredictRequest(BaseModel):
     session_id: str
     input_values: dict   # {column_name: value}
+    model_id: Optional[str] = None
 
 
 # ── V2: Analyse (SSE streaming) ───────────────────────────────────────────────
@@ -253,7 +257,7 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
     """
     def generate():
         try:
-            agent = _get_agent()
+            agent = _get_agent(req.model_id)
         except HTTPException as exc:
             yield _sse({"type": "error", "text": exc.detail}); yield _sse({"type": "done"}); return
 
@@ -410,7 +414,7 @@ def v2_build_pipeline_stream(req: V2BuildPipelineRequest):
             yield _sse({"type": "done"}); return
 
         try:
-            agent = _get_agent()
+            agent = _get_agent(req.model_id)
         except HTTPException as exc:
             yield _sse({"type": "error", "text": exc.detail}); yield _sse({"type": "done"}); return
 
@@ -496,7 +500,7 @@ def v2_chat(req: V2ChatRequest):
     history = state.get("chat_history", [])
 
     try:
-        agent  = _get_agent()
+        agent  = _get_agent(req.model_id)
         result = agent.chat_with_code(req.message, state, history)
     except HTTPException:
         raise
@@ -597,7 +601,7 @@ def v2_predict(req: V2PredictRequest):
         raise HTTPException(400, "Train a model first by running the full pipeline.")
 
     try:
-        agent = _get_agent()
+        agent = _get_agent(req.model_id)
         code  = agent.generate_predict(
             feature_columns=state.get("feature_columns", []),
             input_values=req.input_values,
@@ -613,6 +617,14 @@ def v2_predict(req: V2PredictRequest):
 
     stdout, error, _ = _exec(req.session_id, code)
     return {"code": code, "output": stdout, "error": error}
+
+
+# ── V2: Available models ──────────────────────────────────────────────────────
+
+@app.get("/v2/models")
+def v2_models():
+    """Return the list of AI models whose API keys are configured in .env."""
+    return {"models": get_available_models()}
 
 
 # ── V2: Context ───────────────────────────────────────────────────────────────
