@@ -148,6 +148,13 @@ Include StratifiedKFold cross-validation for classification (KFold for regressio
 Save the trained model to a variable called `model`. List the exact feature column names used for X.
 Add print statements so each cell has visible output. Do NOT call plt.show().
 
+MANDATORY — before ANY model fitting, every pipeline cell that builds X MUST:
+  1. Drop high-cardinality ID-like string columns (nunique/len > 0.9), e.g. CustomerID, columns matching r'^[A-Z]\\d+$'.
+  2. One-hot encode remaining object/string columns with pd.get_dummies(X, drop_first=True).
+  3. Cast X to float: X = X.astype(float).
+  4. Do the same for X_train and X_test if already split (encode first, then split).
+  Never pass a DataFrame with string/object dtype to sklearn — it will always raise ValueError.
+
 Return EXACTLY:
 {{
   "reasoning": "<step-by-step explanation of the approach and every key decision>",
@@ -218,6 +225,26 @@ Known API changes to fix automatically:
   - matplotlib: plt.show() must never be called (backend captures automatically)
   - NameError on a variable: it was likely defined earlier in the code — check whether the entire
     original code was preserved and whether the variable definition is still present
+
+CATEGORICAL / STRING ENCODING — Most common root cause of sklearn failures:
+  • Error "could not convert string to float" or "ValueError: Input X contains NaN" almost always
+    means object/string columns were not encoded before passing to sklearn.
+  • THE FIX: right before building X, add these lines to encode ALL remaining string columns:
+      # Drop high-cardinality ID-like object columns (unique ratio > 0.9)
+      _obj_cols = X.select_dtypes(include='object').columns.tolist()
+      _id_cols  = [c for c in _obj_cols if X[c].nunique() / max(len(X), 1) > 0.9]
+      X = X.drop(columns=_id_cols, errors='ignore')
+      # One-hot encode remaining object columns
+      _cat_cols = X.select_dtypes(include='object').columns.tolist()
+      if _cat_cols:
+          X = pd.get_dummies(X, columns=_cat_cols, drop_first=True)
+      X = X.astype(float)
+  • Apply the SAME transformations to X_train and X_test (or re-split after encoding X).
+  • NEVER call pd.get_dummies on y — only on X feature columns.
+  • If X is already split into X_train/X_test before the error, reconstruct by encoding the
+    full feature matrix first, then splitting again.
+  • ID columns like 'CustomerID', 'customer_id', columns whose values match r'^[A-Z]\\d+$'
+    (e.g. 'C0004', 'C0250') are high-cardinality IDs — always drop them before model fitting.
 
 CRITICAL rules for fixed_code:
   • fixed_code MUST be the ENTIRE original code cell from the very first line to the very last line.
@@ -567,6 +594,40 @@ class MLAgent:
             }
 
     # ── 8. Web search via Tavily (optional) ───────────────────────────────────
+
+    def modify_script(self, message: str, script: str, state: dict) -> dict:
+        """
+        AI chat for the script editor.
+        Returns {"reply": str, "updated_script": str | None}.
+        If the user asks for a code change, updated_script contains the full
+        rewritten script; otherwise it is None (explanation-only response).
+        """
+        sys_prompt = (
+            "You are a senior Python/ML engineer helping the user improve a machine-learning script.\n"
+            "When the user asks you to modify, fix, add, or rewrite code, return the COMPLETE updated script.\n"
+            "When the user asks a question, explain clearly without rewriting the script unless necessary.\n"
+            "Respond ONLY with valid JSON — no prose outside the JSON block.\n"
+            '{\n'
+            '  "reply": "<plain-English explanation or summary of changes>",\n'
+            '  "updated_script": "<full updated Python script, or null if no code changes>"\n'
+            '}'
+        )
+        context_snippet = (
+            f"Dataset: {state.get('filename', 'unknown')}\n"
+            f"Problem type: {state.get('problem_type', 'unknown')}\n"
+            f"Target column: {state.get('target_column', 'unknown')}\n"
+        )
+        user_prompt = (
+            f"Context:\n{context_snippet}\n"
+            f"Current script:\n```python\n{script[:6000]}\n```\n\n"
+            f"User request: {message}"
+        )
+        raw = self._complete(sys_prompt, user_prompt)
+        try:
+            result = _extract_json(raw)
+        except Exception:
+            result = {"reply": raw, "updated_script": None}
+        return result
 
     def web_search(self, query: str) -> str:
         """
