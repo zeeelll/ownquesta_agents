@@ -167,8 +167,6 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
 
         messages.append({"role": "user", "content": user_prompt})
 
-        temperature = 1 if (self.is_greeting(user_message) or self.is_farewell(user_message)) else TEMPERATURE
-
         if not self.client:
             raise RuntimeError(
                 "OpenAI client not configured. Set OPENAI_API_KEY in environment or .env to enable chat functionality."
@@ -178,20 +176,10 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
             # Ensure message contents are strings
             safe_messages = [{'role': m['role'], 'content': str(m['content'])} for m in messages]
 
-            try:
-                response = self.client.chat.completions.create(
-                    model=CHAT_MODEL,
-                    messages=safe_messages,
-                    temperature=temperature,
-                    max_completion_tokens=MAX_TOKENS
-                )
-            except Exception as e:
-                # Some models may reject temperature or max_completion_tokens; retry without them
-                logger.warning("OpenAI chat completion failed: %s. Retrying without temperature/max token params.", e)
-                response = self.client.chat.completions.create(
-                    model=CHAT_MODEL,
-                    messages=safe_messages
-                )
+            response = self.client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=safe_messages,
+            )
 
             assistant_response = response.choices[0].message.content
             return assistant_response, source_ids
