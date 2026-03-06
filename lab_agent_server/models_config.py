@@ -50,13 +50,37 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         "api_key_env":  "OPENAI_API_KEY",
         "free_quota":   None,           # unlimited
     },
+    "claude-opus-4-6": {
+        "display_name": "Claude Opus 4.6",
+        "short_name":   "Opus 4.6",
+        "provider":     "anthropic",
+        "model_name":   "claude-opus-4-6",
+        "api_key_env":  "ANTHROPIC_API_KEY",
+        "free_quota":   1,
+    },
+    "claude-sonnet-4-6": {
+        "display_name": "Claude Sonnet 4.6",
+        "short_name":   "Sonnet 4.6",
+        "provider":     "anthropic",
+        "model_name":   "claude-sonnet-4-6",
+        "api_key_env":  "ANTHROPIC_API_KEY",
+        "free_quota":   1,
+    },
     "claude-sonnet-4-5": {
         "display_name": "Claude Sonnet 4.5",
-        "short_name":   "Claude",
+        "short_name":   "Sonnet 4.5",
         "provider":     "anthropic",
         "model_name":   "claude-sonnet-4-5-20251001",
         "api_key_env":  "ANTHROPIC_API_KEY",
-        "free_quota":   1,              # 1 free session
+        "free_quota":   1,
+    },
+    "claude-haiku-4-5": {
+        "display_name": "Claude Haiku 4.5",
+        "short_name":   "Haiku 4.5",
+        "provider":     "anthropic",
+        "model_name":   "claude-haiku-4-5-20251001",
+        "api_key_env":  "ANTHROPIC_API_KEY",
+        "free_quota":   3,
     },
     "gpt-5-codex": {
         "display_name": "GPT-5 Codex",
