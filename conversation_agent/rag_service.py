@@ -167,7 +167,7 @@ Respond helpfully using your general knowledge. If this might be about OwnQuesta
 
         messages.append({"role": "user", "content": user_prompt})
 
-        temperature = 0.9 if (self.is_greeting(user_message) or self.is_farewell(user_message)) else TEMPERATURE
+        temperature = 1 if (self.is_greeting(user_message) or self.is_farewell(user_message)) else TEMPERATURE
 
         if not self.client:
             raise RuntimeError(
