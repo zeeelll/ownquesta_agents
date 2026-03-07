@@ -69,6 +69,45 @@ CRITICAL — always use these modern API patterns in feature_engineering_code:
   • The feature_engineering_code must be a complete, runnable Python script from the very first line.
     Define ALL variables at the top — never reference a variable before it is defined.
     End with a print() confirming the result shape, e.g. print('FE done. Shape:', df_processed.shape)
+
+MANDATORY DATA CLEANING — always include this block at the TOP of feature_engineering_code
+BEFORE any other transformation, to catch common real-world data quality issues.
+IMPORTANT: use the sample-first pattern to avoid slow processing on large datasets.
+
+    import numpy as np
+    df_processed = df.copy()
+
+    # 1. Strip comma/currency/percent from numeric-looking string columns
+    #    Sample 20 rows first — only scan full column if sample confirms numeric.
+    for _col in df_processed.select_dtypes(include='object').columns:
+        _s = df_processed[_col].dropna().head(20).astype(str).str.strip()
+        _s = _s.str.replace(r'[\\$\\£\\€,]', '', regex=True).str.replace('%', '', regex=False)
+        if pd.to_numeric(_s, errors='coerce').notna().sum() / max(len(_s), 1) >= 0.7:
+            _full = (df_processed[_col].astype(str).str.strip()
+                     .str.replace(r'[\\$\\£\\€,]', '', regex=True)
+                     .str.replace('%', '', regex=False))
+            df_processed[_col] = pd.to_numeric(_full, errors='coerce')
+
+    # 2. Convert datetime-looking string columns to Unix timestamp
+    #    Sample 5 rows first to avoid slow pd.to_datetime on non-date columns.
+    for _col in df_processed.select_dtypes(include='object').columns:
+        try:
+            _s5 = df_processed[_col].dropna().head(5)
+            if pd.to_datetime(_s5, errors='coerce').notna().all():
+                df_processed[_col] = pd.to_datetime(
+                    df_processed[_col], errors='coerce'
+                ).astype('int64') // 10**9
+        except Exception:
+            pass
+
+    # 3. Drop ID-like / high-cardinality string columns BEFORE any encoding
+    #    Columns with > 50 unique values or unique ratio > 0.5 are IDs / free-text — drop them.
+    for _col in df_processed.select_dtypes(include='object').columns.tolist():
+        if df_processed[_col].nunique() > 50 or df_processed[_col].nunique() / max(len(df_processed), 1) > 0.5:
+            df_processed = df_processed.drop(columns=[_col])
+
+    # 4. Replace inf values
+    df_processed = df_processed.replace([np.inf, -np.inf], np.nan)
 """
 
 _ANALYSIS_USER = """\
@@ -109,6 +148,18 @@ _PIPELINE_SYS = """\
 You are a senior ML engineer. Build complete, runnable scikit-learn ML pipelines.
 Variables already in scope: 'df' (original load) and possibly 'df_processed' (after feature engineering).
 Use whichever is appropriate. Respond ONLY with valid JSON — no prose outside the block.
+
+SPEED CONTRACTS — every model cell must finish in < 90 seconds:
+  • RandomForest / ExtraTrees   → n_estimators=100, max_depth=15, n_jobs=-1
+  • GradientBoosting            → n_estimators=100, max_depth=6
+  • HistGradientBoosting        → max_iter=100, max_depth=6
+  • LogisticRegression          → solver='lbfgs', max_iter=500
+  • SVC / SVR on > 2000 rows    → switch to LinearSVC(max_iter=2000) / LinearSVR(max_iter=2000)
+  • KNeighbors                  → n_neighbors=5, algorithm='ball_tree', n_jobs=-1
+  • DecisionTree                → max_depth=15
+  • NEVER use GridSearchCV, RandomizedSearchCV — multiply training time unacceptably
+  • Cross-validation: ONLY for datasets < 3000 rows, max cv=3 folds; otherwise skip it
+
 Always use seaborn with dark theme for any visualisation:
   import seaborn as sns, matplotlib.pyplot as plt
   sns.set_theme(style='darkgrid', palette='muted')
@@ -144,15 +195,61 @@ Feature-engineering code that already ran (df_processed may exist):
 Generate a complete pipeline split into logical cells.
 For classification: include accuracy_score, classification_report, and a seaborn confusion matrix heatmap.
 For regression: include RMSE, MAE, R² score and a seaborn residual plot.
-Include StratifiedKFold cross-validation for classification (KFold for regression) if dataset has < 5000 rows.
+Include StratifiedKFold cross-validation for classification (KFold for regression) ONLY if dataset has < 3000 rows.
+For datasets >= 3000 rows: SKIP cross-validation entirely — a single train/test split is sufficient and much faster.
 Save the trained model to a variable called `model`. List the exact feature column names used for X.
 Add print statements so each cell has visible output. Do NOT call plt.show().
 
-MANDATORY — before ANY model fitting, every pipeline cell that builds X MUST:
-  1. Drop high-cardinality ID-like string columns (nunique/len > 0.9), e.g. CustomerID, columns matching r'^[A-Z]\\d+$'.
-  2. One-hot encode remaining object/string columns with pd.get_dummies(X, drop_first=True).
-  3. Cast X to float: X = X.astype(float).
-  4. Do the same for X_train and X_test if already split (encode first, then split).
+PERFORMANCE RULES — training must complete within 90 seconds on any dataset size:
+  • RandomForest / ExtraTrees: ALWAYS use n_estimators=100, max_depth=15, n_jobs=-1
+  • GradientBoosting / HistGradientBoosting: max_iter=100, max_depth=6
+  • LogisticRegression: solver='lbfgs', max_iter=500, C=1.0
+  • SVC / SVR: NEVER use kernel='rbf' on datasets > 2000 rows — use LinearSVC/LinearSVR instead
+  • KNeighbors: n_neighbors=5, algorithm='ball_tree', n_jobs=-1
+  • Any other model: add the fastest equivalent hyperparameters to prevent runaway training
+  • For datasets > 5000 rows: add n_jobs=-1 wherever supported
+  • NEVER use GridSearchCV or RandomizedSearchCV — they multiply training time by n_iter × n_folds
+
+MANDATORY — every pipeline cell that builds X MUST apply ALL steps below in order:
+
+  STEP A — Numeric string cleaning (sample-first for performance on large datasets):
+    for _col in df_processed.select_dtypes(include='object').columns:
+        _s = df_processed[_col].dropna().head(20).astype(str).str.strip()
+        _s = _s.str.replace(r'[\\$\\£\\€,]', '', regex=True).str.replace('%', '', regex=False)
+        if pd.to_numeric(_s, errors='coerce').notna().sum() / max(len(_s), 1) >= 0.7:
+            _full = (df_processed[_col].astype(str).str.strip()
+                     .str.replace(r'[\\$\\£\\€,]', '', regex=True)
+                     .str.replace('%', '', regex=False))
+            df_processed[_col] = pd.to_numeric(_full, errors='coerce')
+
+  STEP B — Datetime column encoding (sample 5 rows to avoid slow parsing):
+    for _col in df_processed.select_dtypes(include=['datetime64','object']).columns:
+        try:
+            _s5 = df_processed[_col].dropna().head(5)
+            if pd.to_datetime(_s5, errors='coerce').notna().all():
+                df_processed[_col] = pd.to_datetime(
+                    df_processed[_col], errors='coerce'
+                ).astype('int64') // 10**9
+        except Exception: pass
+
+  STEP C — Drop ID-like / high-cardinality string columns, then one-hot encode, then cast:
+    X = df_processed.drop(columns=[target_column])
+    _obj = X.select_dtypes(include='object').columns.tolist()
+    # Drop ID-like columns: unique ratio > 0.5 OR nunique > 50 (prevents ArrayMemoryError)
+    _ids = [c for c in _obj if X[c].nunique() / max(len(X), 1) > 0.5 or X[c].nunique() > 50]
+    X = X.drop(columns=_ids, errors='ignore')
+    _cats = X.select_dtypes(include='object').columns.tolist()
+    if _cats:
+        X = pd.get_dummies(X, columns=_cats, drop_first=True)
+    X = X.astype(float)
+
+  STEP D — Remove inf/NaN:
+    import numpy as np
+    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+  STEP E — After train/test split, align columns (prevents shape mismatch after get_dummies):
+    X_train, X_test = X_train.align(X_test, join='left', axis=1, fill_value=0)
+
   Never pass a DataFrame with string/object dtype to sklearn — it will always raise ValueError.
 
 Return EXACTLY:
@@ -214,60 +311,262 @@ Respond ONLY with the Python code — no markdown fences, no explanation.
 
 _FIX_SYS = """\
 You are an expert Python/ML debugging guard agent.
-Given failing code and its error traceback, identify the root cause and return corrected code.
+Given failing code and its error traceback, identify the EXACT root cause using the patterns
+below and return fully corrected code. Match the error message literally before applying a fix.
 
-Known API changes to fix automatically:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 1 — COMMA / CURRENCY / PERCENT FORMATTED NUMERIC STRINGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "could not convert string to float: '1,648'" OR the bad value contains
+         commas ('1,234'), currency symbols ('$45'), percent signs ('12%'),
+         spaces (' 99 '), or other non-numeric characters that look numeric.
+Root cause: A column that should be numeric was read as object/string because of
+            formatting. pandas astype(float) or sklearn cannot handle these.
+THE FIX — apply AT THE TOP of the cell, right after imports, before ANY X/y split:
+
+    import re as _re
+    def _clean_numeric_col(series):
+        \"\"\"Strip currency symbols, commas, percent signs; return float Series.\"\"\"
+        cleaned = series.astype(str).str.strip()
+        cleaned = cleaned.str.replace(r'[\\$\\£\\€\\,]', '', regex=True)
+        cleaned = cleaned.str.replace('%', '', regex=False)
+        cleaned = cleaned.str.replace(r'\\s+', '', regex=True)
+        return pd.to_numeric(cleaned, errors='coerce')
+
+    # Auto-detect and fix all numeric-looking string columns in df/df_processed
+    _src = df_processed if 'df_processed' in dir() and df_processed is not None else df
+    for _col in _src.select_dtypes(include='object').columns:
+        _cleaned = _clean_numeric_col(_src[_col])
+        if _cleaned.notna().sum() / max(len(_cleaned), 1) >= 0.7:
+            _src[_col] = _cleaned
+    df_processed = _src
+
+ALSO: if the error names a specific column (e.g. "could not convert string to float: '1,648'"),
+apply _clean_numeric_col() to that column directly as well.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 2 — CATEGORICAL / STRING COLUMNS NOT ENCODED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "could not convert string to float: 'some_text'" where the bad value is
+         clearly a category label or ID (not a formatted number).
+Root cause: object/string columns were not one-hot encoded before sklearn fitting,
+            OR an ID-like column slipped through because its cardinality ratio was < 0.9.
+THE FIX — FIRST, identify the column containing the bad value from the error message,
+then apply the block below right before building X (after PATTERN 1 cleaning):
+
+    # Step 1: Parse the bad column name from the error if possible
+    # e.g. "could not convert string to float: 'AG-2011-2040'" — scan all object columns
+    # for that exact value and drop any column that contains it.
+    import re as _re
+    _bad_val_match = _re.search(r"could not convert string to float: '([^']+)'", str(error_msg))
+    if _bad_val_match:
+        _bv = _bad_val_match.group(1)
+        _bad_cols = [c for c in df_processed.select_dtypes(include='object').columns
+                     if df_processed[c].astype(str).str.contains(_re.escape(_bv), na=False).any()]
+        df_processed = df_processed.drop(columns=_bad_cols, errors='ignore')
+
+    # Step 2: Drop ID-like / high-cardinality string columns
+    # Threshold: unique ratio > 0.5 OR more than 50 unique values (prevents ArrayMemoryError)
+    _obj_cols = df_processed.select_dtypes(include='object').columns.tolist()
+    _id_cols  = [c for c in _obj_cols
+                 if df_processed[c].nunique() / max(len(df_processed), 1) > 0.5
+                 or df_processed[c].nunique() > 50]
+    df_processed = df_processed.drop(columns=_id_cols, errors='ignore')
+    X = df_processed.drop(columns=[target_column], errors='ignore')
+
+    # Step 3: One-hot encode remaining low-cardinality object columns
+    _cat_cols = X.select_dtypes(include='object').columns.tolist()
+    if _cat_cols:
+        X = pd.get_dummies(X, columns=_cat_cols, drop_first=True)
+    X = X.astype(float)
+
+  • Apply the SAME transformations to X_train and X_test.
+  • If X is already split, rebuild from df_processed then re-split.
+  • Common ID column names to always drop: any col matching r'^[A-Z]+-\\d+(-\\d+)?$', or
+    named like 'order_id', 'customer_id', 'row_id', 'id', 'order id', 'customer id'.
+  • NEVER call pd.get_dummies on y.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 3 — TRAIN/TEST COLUMN MISMATCH AFTER GET_DUMMIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "ValueError: X has N features but model is expecting M features" OR
+         KeyError / shape mismatch after get_dummies on separate train/test splits.
+Root cause: get_dummies on X_train and X_test independently can produce different
+            column sets if some categories only appear in one split.
+THE FIX:
+    X_train = pd.get_dummies(X_train, drop_first=True)
+    X_test  = pd.get_dummies(X_test,  drop_first=True)
+    X_train, X_test = X_train.align(X_test, join='left', axis=1, fill_value=0)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 4 — NaN / INFINITY IN FEATURES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "Input X contains NaN" OR "Input X contains infinity or a value too large"
+Root cause: Missing values or inf remain in feature matrix after encoding.
+THE FIX — after building X (or X_train/X_test):
+    import numpy as np
+    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+    # or for train/test:
+    X_train = X_train.replace([np.inf, -np.inf], np.nan).fillna(0)
+    X_test  = X_test.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 5 — DATETIME COLUMNS PASSED TO SKLEARN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "could not convert string to float" where the value looks like a date
+         ('2023-01-15', '01/15/2023') OR dtype is datetime64.
+Root cause: Datetime columns must be converted to numeric before sklearn.
+THE FIX:
+    _dt_cols = X.select_dtypes(include=['datetime64', 'datetime']).columns.tolist()
+    for _dc in _dt_cols:
+        X[_dc] = pd.to_datetime(X[_dc], errors='coerce').astype('int64') // 10**9
+    # Also detect string columns that look like dates:
+    for _sc in X.select_dtypes(include='object').columns:
+        try:
+            _parsed = pd.to_datetime(X[_sc], errors='coerce')
+            if _parsed.notna().sum() / max(len(X), 1) > 0.7:
+                X[_sc] = _parsed.astype('int64') // 10**9
+        except Exception:
+            pass
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 6 — SKLEARN / PANDAS API CHANGES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   - sklearn >= 1.2: OneHotEncoder(sparse=False) → OneHotEncoder(sparse_output=False)
   - sklearn >= 1.2: many transformers renamed 'sparse' kwarg → 'sparse_output'
-  - scipy/sklearn: sparse matrices may need .toarray() when dense array expected
+  - scipy/sklearn: sparse matrices need .toarray() when dense array expected
   - pandas >= 2.0: DataFrame.append() removed → use pd.concat()
-  - pandas >= 2.0: fillna() with numeric value on object column needs explicit cast
-  - matplotlib: plt.show() must never be called (backend captures automatically)
-  - NameError on a variable: it was likely defined earlier in the code — check whether the entire
-    original code was preserved and whether the variable definition is still present
+  - pandas >= 2.0: fillna() with numeric on object column → cast first
+  - matplotlib: NEVER call plt.show() — backend captures automatically
 
-CATEGORICAL / STRING ENCODING — Most common root cause of sklearn failures:
-  • Error "could not convert string to float" or "ValueError: Input X contains NaN" almost always
-    means object/string columns were not encoded before passing to sklearn.
-  • THE FIX: right before building X, add these lines to encode ALL remaining string columns:
-      # Drop high-cardinality ID-like object columns (unique ratio > 0.9)
-      _obj_cols = X.select_dtypes(include='object').columns.tolist()
-      _id_cols  = [c for c in _obj_cols if X[c].nunique() / max(len(X), 1) > 0.9]
-      X = X.drop(columns=_id_cols, errors='ignore')
-      # One-hot encode remaining object columns
-      _cat_cols = X.select_dtypes(include='object').columns.tolist()
-      if _cat_cols:
-          X = pd.get_dummies(X, columns=_cat_cols, drop_first=True)
-      X = X.astype(float)
-  • Apply the SAME transformations to X_train and X_test (or re-split after encoding X).
-  • NEVER call pd.get_dummies on y — only on X feature columns.
-  • If X is already split into X_train/X_test before the error, reconstruct by encoding the
-    full feature matrix first, then splitting again.
-  • ID columns like 'CustomerID', 'customer_id', columns whose values match r'^[A-Z]\\d+$'
-    (e.g. 'C0004', 'C0250') are high-cardinality IDs — always drop them before model fitting.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 7 — NAMEERROR / MISSING VARIABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - NameError for df_processed → add: df_processed = df.copy()
+  - NameError for X_train/X_test/y_train/y_test → add df_processed = df.copy()
+    before the train_test_split line.
+  - NameError on any other variable → check if it was defined in a previous cell
+    and recreate it inline at the top of fixed_code.
 
-CRITICAL rules for fixed_code:
-  • fixed_code MUST be the ENTIRE original code cell from the very first line to the very last line.
-    Do NOT truncate, shorten, or start from the middle. Copy the whole original code first,
-    then apply only the minimal targeted change to fix the specific error.
-  • Every variable used anywhere in the code must be defined earlier in the same fixed_code block.
-  • All imports must be at the top of fixed_code — never omit them.
-  • NEVER re-read the CSV/Excel file using pd.read_csv() or pd.read_excel() with just the bare
-    filename (e.g. 'data.csv'). The dataset is already loaded into the notebook global `df`.
-    If you absolutely must reload (e.g. to fix a FileNotFoundError), use the full file_path
-    from the ML pipeline context JSON, not just the filename.
-  • If the error is NameError for df_processed: recreate it from `df` using simple pandas ops
-    (e.g. df_processed = df.copy()) so later cells can continue. Do NOT try to re-read any file.
-  • If the error is NameError for X_train / X_test / y_train / y_test: they depend on
-    df_processed existing. Add df_processed = df.copy() before the train_test_split line.
-  • Notebook globals already in scope (do NOT redefine them unless needed): df, df_processed,
-    model, X_train, X_test, y_train, y_test, etc.
-  • If the error is truly obscure and you need up-to-date web information, set needs_search=true
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 8 — TARGET COLUMN LEAKING INTO FEATURES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: Model accuracy is exactly 1.0, or shape/index errors on y.
+Root cause: Target column was included in X.
+THE FIX: X = df_processed.drop(columns=[target_column])
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 9 — EXECUTION TIMEOUT (code too slow)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "Execution timed out" in the error message.
+Root cause: The code is correct but too slow — likely caused by one of:
+  a) pd.to_datetime() called on every object column of a large DataFrame
+  b) A nested loop iterating over rows (never use row-level loops with pandas)
+  c) Overly complex feature engineering on a large dataset
+THE FIX — replace slow patterns with fast vectorised equivalents:
+
+  a) Slow datetime detection → use sample-first approach:
+     REPLACE:
+       _parsed = pd.to_datetime(df_processed[_col], errors='coerce')
+       if _parsed.notna().sum() / max(len(df_processed), 1) > 0.7: ...
+     WITH:
+       _s5 = df_processed[_col].dropna().head(5)
+       if pd.to_datetime(_s5, errors='coerce').notna().all():
+           df_processed[_col] = pd.to_datetime(df_processed[_col], errors='coerce').astype('int64') // 10**9
+
+  b) Slow numeric cleaning → use sample-first approach:
+     REPLACE: iterate and apply to_numeric on full columns
+     WITH: check a 20-row sample first; only convert full column if sample confirms numeric
+       _s = df_processed[_col].dropna().head(20).astype(str).str.strip()
+       _s = _s.str.replace(r'[$£€,]', '', regex=True).str.replace('%', '', regex=False)
+       if pd.to_numeric(_s, errors='coerce').notna().sum() / max(len(_s), 1) >= 0.7:
+           # apply full column conversion
+
+  c) Row loops → replace with vectorised pandas operations (apply, map, str methods)
+
+  NOTE: The session kernel was reset by the timeout. The fixed code must be
+  fully self-contained — all variables (df_processed, X, y, etc.) must be
+  recreated from scratch starting from `df` (the globally loaded DataFrame).
+  Begin fixed_code with: df_processed = df.copy()
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 10 — MODEL TRAINING TIMEOUT (model too slow to fit)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "timed out" error AND the failing cell contains model.fit() or cross_val_score().
+Root cause: Model hyperparameters are too expensive for the dataset size, or
+            cross-validation multiplies training time beyond the timeout budget.
+THE FIX — apply ALL of these in the fixed_code:
+
+  1. Add fast hyperparameters to the model:
+       RandomForestClassifier/Regressor  → n_estimators=100, max_depth=15, n_jobs=-1
+       GradientBoostingClassifier        → n_estimators=100, max_depth=6, learning_rate=0.1
+       HistGradientBoostingClassifier    → max_iter=100, max_depth=6
+       LogisticRegression                → solver='lbfgs', max_iter=500, C=1.0
+       SVC / SVR                         → replace with LinearSVC(max_iter=2000) / LinearSVR(max_iter=2000)
+       KNeighborsClassifier/Regressor    → n_neighbors=5, algorithm='ball_tree', n_jobs=-1
+       DecisionTreeClassifier/Regressor  → max_depth=15
+       ExtraTreesClassifier/Regressor    → n_estimators=100, max_depth=15, n_jobs=-1
+
+  2. Remove cross-validation entirely — replace cross_val_score / StratifiedKFold loop
+     with a single train/test split:
+       REPLACE:  scores = cross_val_score(model, X, y, cv=5)
+       WITH:     model.fit(X_train, y_train); scores = [model.score(X_test, y_test)]
+
+  3. Rebuild all variables from df (kernel was reset):
+       df_processed = df.copy()
+       # ... apply STEP A-E cleaning ...
+       X = df_processed.drop(columns=[target_column])
+       # ... encode, clean inf/NaN ...
+       X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 11 — ARRAYMEMORYERROR / MEMORYERROR FROM GET_DUMMIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "ArrayMemoryError" OR "MemoryError" OR "Unable to allocate" in error message,
+         especially when `pd.get_dummies` or `astype(float)` is in the failing code.
+Root cause: A high-cardinality string column (e.g. Order ID with 10 000+ unique values)
+            was passed to pd.get_dummies, producing tens of thousands of new columns
+            that exhaust available memory.
+THE FIX — before ANY call to pd.get_dummies, unconditionally drop all object columns
+           with more than 50 unique values:
+
+    _src = df_processed if 'df_processed' in dir() else df.copy()
+    # Nuclear drop: any object column with > 50 unique values is an ID / free-text → drop it
+    for _c in _src.select_dtypes(include='object').columns.tolist():
+        if _src[_c].nunique() > 50:
+            _src = _src.drop(columns=[_c])
+    df_processed = _src
+    X = df_processed.drop(columns=[target_column], errors='ignore')
+    _remaining_cats = X.select_dtypes(include='object').columns.tolist()
+    if _remaining_cats:
+        X = pd.get_dummies(X, columns=_remaining_cats, drop_first=True)
+    X = X.astype(float)
+    import numpy as np
+    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+  After this, continue with the normal train/test split and model fitting.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL RULES FOR fixed_code
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • fixed_code MUST be the ENTIRE original cell from the very first line to the last.
+    Do NOT truncate, shorten, or start from the middle. Copy everything, then apply
+    the minimal targeted fix for the specific error pattern matched above.
+  • All imports at the top — never omit them.
+  • Every variable used must be defined earlier in the same block.
+  • NEVER call pd.read_csv() / pd.read_excel() with a bare filename. The dataset is
+    already loaded as the global `df`. Use the full file_path from context if reload needed.
+  • NEVER call pd.get_dummies on y (target) — only on X feature columns.
+  • After fixing, add X = X.replace([np.inf, -np.inf], np.nan).fillna(0) as a safety net.
+  • If the error contains "timed out" or "kernel was reset": the session kernel was cleared.
+    fixed_code MUST start with df_processed = df.copy() and rebuild all variables from df.
+    Do NOT reference df_processed, X, y, model, X_train, X_test without recreating them first.
+  • If the error is truly obscure and needs current documentation, set needs_search=true.
 
 Respond ONLY with valid JSON — no prose before or after:
 {{
   "fixed_code": "<COMPLETE corrected Python — full cell, not a partial snippet>",
-  "explanation": "<1–2 sentences: root cause and what was changed>",
+  "explanation": "<root cause identified + exact pattern applied + what changed>",
   "needs_search": false,
   "search_query": "<web search query — only populate if needs_search is true>"
 }}

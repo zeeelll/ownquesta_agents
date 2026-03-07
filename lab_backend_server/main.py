@@ -26,7 +26,7 @@ app.add_middleware(
 
 sessions: dict[str, subprocess.Popen] = {}
 
-EXEC_TIMEOUT = 60
+EXEC_TIMEOUT = 120
 EXECUTOR_PATH = Path(__file__).parent / "worker" / "executor.py"
 
 # ── Server-side code restrictions ─────────────────────────────────
@@ -150,7 +150,29 @@ def execute_cell(req: ExecuteRequest):
 
     raw = _read_line_timeout(proc, EXEC_TIMEOUT)
     if raw is None:
-        return {"stdout": "", "error": "Execution timed out (10s limit)"}
+        # The worker is stuck — kill it and restart a fresh one so the session
+        # stays usable. Without this, the next execution reads the stale result
+        # from this timed-out run and the session falls permanently out of sync.
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+        new_proc = subprocess.Popen(
+            [sys.executable, "-u", str(EXECUTOR_PATH)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        sessions[req.session_id] = new_proc
+        return {
+            "stdout": "",
+            "error": (
+                f"Execution timed out ({EXEC_TIMEOUT}s limit). "
+                "Session kernel was reset — all variables cleared. "
+                "The guard agent will retry with more efficient code."
+            ),
+        }
     if not raw:
         return {"stdout": "", "error": "Worker returned empty response"}
 

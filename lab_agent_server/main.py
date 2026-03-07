@@ -3,10 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Generator
-import os   
 import uuid
 import json
 import logging
+import re
+import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -37,7 +38,7 @@ agent_states: dict[str, MLState] = {}
 v2_sessions:  dict[str, dict]    = {}
 
 LAB_BACKEND     = "http://localhost:8010"
-MAX_FIX_ATTEMPTS = 5   # guard retry budget per failing cell
+MAX_FIX_ATTEMPTS = 7   # guard retry budget per failing cell
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -55,6 +56,82 @@ def _exec(session_id: str, code: str) -> tuple[str, str | None, list[str]]:
             return data.get("stdout", ""), data.get("error") or None, data.get("charts", [])
     except Exception as exc:
         return "", str(exc), []
+
+
+# ── Persistent fix memory (lightweight "reinforcement") ───────────────────────
+# When the guard successfully fixes an error, the (fingerprint → fix) pair is
+# saved to fix_memory.json.  On the next run, matching errors skip straight to
+# the proven fix instead of starting from scratch with the LLM.
+
+_FIX_MEMORY_PATH = Path(__file__).parent / "fix_memory.json"
+_fix_memory_lock = threading.Lock()
+
+
+def _error_fingerprint(error: str, stage: str) -> str:
+    """Produce a stable, short key for an error type + stage combination."""
+    # Extract the exception class name (ValueError, NameError, …)
+    m = re.search(r'\b([A-Z][a-zA-Z]+Error)\b', error)
+    exc_type = m.group(1) if m else "Error"
+    # Extract the first quoted token (e.g. the bad column value or module name)
+    q = re.search(r"['\"]([^'\"]{1,60})['\"]", error)
+    token = q.group(1) if q else ""
+    # Normalise numbers/IDs so 'AG-2011-2040' and 'US-2013-100328' hash the same
+    token_norm = re.sub(r'\d+', 'N', token)
+    return f"{stage}|{exc_type}|{token_norm}"
+
+
+def _load_fix_memory() -> list[dict]:
+    if not _FIX_MEMORY_PATH.exists():
+        return []
+    try:
+        with _FIX_MEMORY_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_fix_memory(entries: list[dict]) -> None:
+    with _fix_memory_lock:
+        try:
+            with _FIX_MEMORY_PATH.open("w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+
+def _recall_fix(error: str, stage: str) -> dict | None:
+    """Return the best memorised fix for this error/stage, or None."""
+    fp = _error_fingerprint(error, stage)
+    entries = _load_fix_memory()
+    # Exact fingerprint match — return the one with most successes
+    candidates = [e for e in entries if e.get("fingerprint") == fp]
+    if candidates:
+        return max(candidates, key=lambda e: e.get("success_count", 0))
+    return None
+
+
+def _record_fix(error: str, stage: str, fixed_code: str, explanation: str) -> None:
+    """Persist a successful fix so the guard can reuse it later."""
+    fp = _error_fingerprint(error, stage)
+    entries = _load_fix_memory()
+    # Update existing entry if fingerprint already known
+    for e in entries:
+        if e.get("fingerprint") == fp:
+            e["success_count"] = e.get("success_count", 0) + 1
+            e["fixed_code"]   = fixed_code    # keep the most recent working version
+            e["explanation"]  = explanation
+            _save_fix_memory(entries)
+            return
+    # New pattern — append
+    entries.append({
+        "fingerprint":   fp,
+        "error_sample":  error[:300],
+        "stage":         stage,
+        "fixed_code":    fixed_code,
+        "explanation":   explanation,
+        "success_count": 1,
+    })
+    _save_fix_memory(entries)
 
 
 def _get_agent(model_id: Optional[str] = None) -> MLAgent:
@@ -122,6 +199,25 @@ def _guard_fix(
         result = yield from _guard_fix(agent, sid, code, error, state, title)
         code, stdout, error, charts = result
     """
+    _RESET_MARKERS = (
+        "kernel was reset",
+        "execution timed out",
+        "timed out",
+        "name 'df' is not defined",       # df lost after kernel reset
+        "name 'df_processed' is not defined",
+    )
+
+    def _is_kernel_reset(err: str) -> bool:
+        lo = err.lower()
+        return any(m in lo for m in _RESET_MARKERS)
+
+    def _df_reload_code(fp: str) -> str:
+        ext = fp.rsplit(".", 1)[-1].lower() if "." in fp else ""
+        fn = "pd.read_excel" if ext in ("xlsx", "xls") else "pd.read_csv"
+        return f"import pandas as pd\ndf = {fn}(r'{fp}')\nprint('Dataset restored:', df.shape)"
+
+    stage = context.get("stage", title)
+
     for attempt in range(MAX_FIX_ATTEMPTS):
         # Notify frontend that guard is analysing
         yield _sse({
@@ -131,28 +227,48 @@ def _guard_fix(
             "attempt": attempt + 1,
         })
 
-        fix = agent.fix_error(code, error, context)
+        # ── Fix memory: try a proven fix before calling the LLM ──────────────
+        memory_hit = _recall_fix(error, stage) if attempt == 0 else None
+        if memory_hit:
+            fixed       = memory_hit["fixed_code"]
+            explanation = f"[Memory] {memory_hit['explanation']}"
+            yield _sse({"type": "fix_attempt", "code": fixed,
+                        "explanation": explanation, "attempt": attempt + 1})
+        else:
+            # ── LLM fix ──────────────────────────────────────────────────────
+            fix = agent.fix_error(code, error, context)
 
-        # Optionally escalate to Tavily web search
-        if fix.get("needs_search") and fix.get("search_query"):
-            query = fix["search_query"]
-            yield _sse({"type": "web_searching", "query": query})
-            sr = agent.web_search(query)
-            if sr:
-                fix = agent.fix_error(code, error, context, sr)
+            # Optionally escalate to Tavily web search
+            if fix.get("needs_search") and fix.get("search_query"):
+                query = fix["search_query"]
+                yield _sse({"type": "web_searching", "query": query})
+                sr = agent.web_search(query)
+                if sr:
+                    fix = agent.fix_error(code, error, context, sr)
 
-        fixed = (fix.get("fixed_code") or "").strip()
-        explanation = fix.get("explanation", "")
+            fixed       = (fix.get("fixed_code") or "").strip()
+            explanation = fix.get("explanation", "")
 
-        # Guard couldn't produce a different fix — bail out
-        if not fixed or fixed == code:
-            break
+            # Guard couldn't produce a different fix — bail out
+            if not fixed or fixed == code:
+                break
 
-        yield _sse({"type": "fix_attempt", "code": fixed, "explanation": explanation, "attempt": attempt + 1})
+            yield _sse({"type": "fix_attempt", "code": fixed,
+                        "explanation": explanation, "attempt": attempt + 1})
+
+        # ── Kernel-reset recovery: restore df before running any retry ────────
+        if _is_kernel_reset(error):
+            file_path = context.get("file_path", "")
+            if file_path:
+                yield _sse({"type": "status", "text": "Restoring dataset after kernel reset…"})
+                _exec(session_id, _df_reload_code(file_path))
+        # ── End kernel-reset recovery ─────────────────────────────────────────
 
         new_stdout, new_err, new_charts = _exec(session_id, fixed)
         if not new_err:
             yield _sse({"type": "fix_success", "title": title, "explanation": explanation})
+            # Persist this successful fix so future runs skip the LLM
+            _record_fix(error, stage, fixed, explanation)
             return fixed, new_stdout, None, new_charts   # type: ignore[return-value]
 
         # Still failing — update code/error for next attempt
