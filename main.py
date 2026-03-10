@@ -42,14 +42,6 @@ logging.basicConfig(
 logger = logging.getLogger("ownquesta_agents")
 
 
-def _is_number(value: str) -> bool:
-    try:
-        float(value)
-        return True
-    except Exception:
-        return False
-
-
 def try_import_router(module_path: str, attr: str = "router") -> Optional[object]:
     try:
         mod = importlib.import_module(module_path)
@@ -90,47 +82,6 @@ def try_import_router(module_path: str, attr: str = "router") -> Optional[object
 
 
 # ─────────────────────────────────────────────
-# AGENT REGISTRY — Only the 6 active agents
-# ─────────────────────────────────────────────
-AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
-    "conversation_agent": {
-        "module": "conversation_agent.endpoint",
-        "prefix": "/conversation",
-        "name": "Conversation Agent",
-    },
-    "manager_agent": {
-        "module": "manager_agent.endpoint",
-        "prefix": "/manager",
-        "name": "Manager Agent",
-    },
-    "validation_agent": {
-        "module": "validation_agent.endpoint",
-        "prefix": "/validation",
-        "name": "Validation Agent",
-    },
-    "fp_agent": {
-        "module": "fp_agent.endpoint",
-        "prefix": "/fp",
-        "name": "FP Agent",
-    },
-    "model_agent": {
-        "module": "model_agent.endpoint",
-        "prefix": "/model",
-        "name": "Model Agent",
-    },
-    "moco_agent": {
-        "module": "moco_agent.endpoint",
-        "prefix": "/moco",
-        "name": "Moco Agent",
-    },
-}
-
-# Load all agent routers
-agent_routers: Dict[str, Optional[object]] = {}
-for key, meta in AGENT_REGISTRY.items():
-    agent_routers[key] = try_import_router(meta["module"])
-
-# ─────────────────────────────────────────────
 # QUESTA AGENT — Loaded separately
 # The router already has prefix="/questa" in endpoint.py
 # So we include it WITHOUT adding a prefix here
@@ -164,9 +115,6 @@ app.add_middleware(
 
 def get_available_agents() -> List[Dict[str, Any]]:
     agents: List[Dict[str, Any]] = []
-    for key, meta in AGENT_REGISTRY.items():
-        if agent_routers.get(key):
-            agents.append({"name": meta["name"], "prefix": meta["prefix"]})
     if questa_router:
         agents.append({"name": "Questa AI Assistant", "prefix": "/questa"})
     return agents
@@ -185,14 +133,14 @@ def root():
 
 @app.get("/health")
 def health():
-    agent_status = {key: ("available" if r else "unavailable") for key, r in agent_routers.items()}
-    agent_status["questa_agent"] = "available" if questa_router else "unavailable"
-    overall = "ok" if any(v == "available" for v in agent_status.values()) else "degraded"
+    overall = "ok" if questa_router else "degraded"
 
     return {
         "status": overall,
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "agents": agent_status,
+        "agents": {
+            "questa_agent": "available" if questa_router else "unavailable"
+        },
         "version": "1.0.0",
         "openai_configured": bool(OPENAI_API_KEY),
         "questa_agent_available": bool(questa_router),
@@ -207,9 +155,6 @@ def health():
 @app.get("/meta.json")
 def meta():
     endpoints = ["/", "/health", "/meta.json"]
-    for key, router in agent_routers.items():
-        if router:
-            endpoints.append(AGENT_REGISTRY[key]["prefix"])
     if questa_router:
         endpoints.extend(["/questa/chat", "/questa/info", "/questa/health"])
     return {
@@ -220,16 +165,6 @@ def meta():
         "agents": get_available_agents()
     }
 
-
-# ─────────────────────────────────────────────
-# REGISTER AGENT ROUTERS
-# ─────────────────────────────────────────────
-logger.info("Registering available agent routers...")
-for key, router in agent_routers.items():
-    if router is not None:
-        meta = AGENT_REGISTRY[key]
-        app.include_router(router, prefix=meta["prefix"], tags=[meta["name"]])
-        logger.info(f"{meta['name']} registered at {meta['prefix']}")
 
 # ─────────────────────────────────────────────
 # REGISTER QUESTA ROUTER
