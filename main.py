@@ -4,10 +4,13 @@ import importlib
 import importlib.util
 import logging
 import os
+import asyncio
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+
+from services import start_services, stop_services
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / ".env"
@@ -244,6 +247,7 @@ else:
 
 @app.on_event("startup")
 async def startup_event():
+<<<<<<< HEAD
     logger.info("=" * 55)
     logger.info("  OwnQuesta Agent API Starting Up")
     logger.info("=" * 55)
@@ -253,6 +257,16 @@ async def startup_event():
     logger.info("=" * 55)
 
 
+=======
+    logger.info("OwnQuesta Agent API is starting up...")
+    logger.info(f"Available agents: {[agent['name'] for agent in get_available_agents()]}")
+    # Start lab-backend and lab-agent as sub-processes (runs in a thread so
+    # blocking health-check polls don't stall the asyncio event loop).
+    await asyncio.to_thread(start_services)
+
+# Add shutdown event
+>>>>>>> b11afebbe94c91b7e28f7192f68000736d2360d9
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("OwnQuesta Agent API is shutting down...")
+    stop_services()
