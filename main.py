@@ -247,7 +247,6 @@ else:
 
 @app.on_event("startup")
 async def startup_event():
-<<<<<<< HEAD
     logger.info("=" * 55)
     logger.info("  OwnQuesta Agent API Starting Up")
     logger.info("=" * 55)
@@ -256,16 +255,10 @@ async def startup_event():
     logger.info(f"Questa AI Agent:   {'✅ Active' if questa_router else '❌ Unavailable'}")
     logger.info("=" * 55)
 
-
-=======
-    logger.info("OwnQuesta Agent API is starting up...")
-    logger.info(f"Available agents: {[agent['name'] for agent in get_available_agents()]}")
-    # Start lab-backend and lab-agent as sub-processes (runs in a thread so
-    # blocking health-check polls don't stall the asyncio event loop).
+    # Start lab-backend and lab-agent services
     await asyncio.to_thread(start_services)
 
-# Add shutdown event
->>>>>>> b11afebbe94c91b7e28f7192f68000736d2360d9
+
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("OwnQuesta Agent API is shutting down...")
