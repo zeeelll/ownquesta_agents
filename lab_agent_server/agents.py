@@ -127,7 +127,7 @@ Return EXACTLY the following JSON (no extra keys, no markdown outside the block)
   "feature_analysis": "<what columns exist, their types, any quality issues>",
   "missing_values_note": "<how to handle NaN — drop / impute / flag>",
   "feature_engineering_reasoning": "<what transformations are needed and why>",
-  "feature_engineering_code": "<complete Python — 'df' is already in scope; use pandas/sklearn; end with print('Feature engineering done. Shape:', df_processed.shape) or similar>",
+  "feature_engineering_code": "<complete Python — 'df' is already in scope; use pandas/sklearn; end with print('Feature engineering done. Shape:', df_processed.shape) or similar. IMPORTANT: when using OneHotEncoder always fit on a DataFrame slice (not .values) so feature_names_in_ is set, and call get_feature_names_out() with NO arguments — never pass column names explicitly to get_feature_names_out().>",
   "models": [
     {{
       "rank": 1,
@@ -545,6 +545,33 @@ THE FIX — before ANY call to pd.get_dummies, unconditionally drop all object c
     X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
 
   After this, continue with the normal train/test split and model fitting.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PATTERN 12 — get_feature_names_out() INPUT MISMATCH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trigger: "ValueError: input_features is not equal to feature_names_in_"
+Root cause: get_feature_names_out(input_features) was called with column names that
+            do not exactly match what the encoder was fitted on (its feature_names_in_
+            attribute). This mismatch also occurs when the encoder was fitted on a
+            numpy array (so feature_names_in_ is not set) but explicit names are passed.
+THE FIX — two sub-cases:
+
+  Sub-case A (most common): encoder fitted on a DataFrame, names passed to get_feature_names_out don't match.
+    REPLACE: encoder.get_feature_names_out(['col1', 'col2', ...])
+    WITH:    encoder.get_feature_names_out()   # uses feature_names_in_ automatically
+
+  Sub-case B: encoder fitted on a numpy array (.values), so feature_names_in_ is unset.
+    REPLACE: ohe.fit_transform(df[cols].values)
+             ohe.get_feature_names_out(cols)
+    WITH:    ohe.fit_transform(df[cols])       # DataFrame input sets feature_names_in_
+             ohe.get_feature_names_out()       # now works without args
+
+  Universal safe pattern for OneHotEncoder feature engineering:
+    _cat_cols = ['Contract_Type', 'Payment_Method']  # or whatever categorical cols
+    ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+    encoded = ohe.fit_transform(df_processed[_cat_cols])   # fit on DataFrame
+    encoded_df = pd.DataFrame(encoded, columns=ohe.get_feature_names_out(), index=df_processed.index)
+    df_processed = pd.concat([df_processed.drop(columns=_cat_cols), encoded_df], axis=1)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CRITICAL RULES FOR fixed_code
