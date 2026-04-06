@@ -19,6 +19,8 @@ from .config import (
     AGENT_ROLE,
     WELCOME_MESSAGE,
     SUGGESTED_QUESTIONS,
+    get_local_answer,
+    get_relevant_context,
 )
 
 # ─────────────────────────────────────────────
@@ -78,12 +80,15 @@ class HealthResponse(BaseModel):
 # ─────────────────────────────────────────────
 # HELPER — BUILD MESSAGES FOR OPENAI
 # ─────────────────────────────────────────────
-def build_messages(user_message: str, history: List[ChatMessage]) -> List[dict]:
+def build_messages(user_message: str, history: List[ChatMessage], context: str) -> List[dict]:
     """
     Constructs the full message list for OpenAI:
     System prompt + recent conversation history + current user message.
     """
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    if context:
+        messages.append({"role": "system", "content": f"Relevant Ownquesta context:\n{context}"})
 
     # Keep only the last MAX_HISTORY messages for context window efficiency
     recent_history = history[-MAX_HISTORY:]
@@ -140,6 +145,14 @@ async def chat(request: ChatRequest):
     Main chat endpoint. Accepts user message + conversation history.
     Returns Questa's intelligent reply powered by OpenAI.
     """
+    local_reply = get_local_answer(request.message)
+    if local_reply:
+        return ChatResponse(
+            reply=local_reply,
+            agent=AGENT_NAME,
+            model=OPENAI_MODEL,
+        )
+
     # Guard: API key must be set
     if not OPENAI_API_KEY:
         logger.error("OPENAI_API_KEY is not configured in .env")
@@ -149,7 +162,8 @@ async def chat(request: ChatRequest):
         )
 
     try:
-        messages = build_messages(request.message, request.history)
+        context = get_relevant_context(request.message)
+        messages = build_messages(request.message, request.history, context)
 
         logger.info(f"[Questa] Sending request to OpenAI | model={OPENAI_MODEL} | history_length={len(request.history)}")
 
