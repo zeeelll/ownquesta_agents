@@ -29,6 +29,7 @@ WELCOME_MESSAGE = (
 
 SUGGESTED_QUESTIONS = [
   "How does Ownquesta work from start to finish?",
+  "What do I learn in the ML Tutorial?",
   "What happens after I click Analyse?",
   "What is the AutoML Playground?",
   "What is Easy Mode vs Code Mode?",
@@ -55,6 +56,22 @@ APP_KNOWLEDGE = [
       "10. Model or Python script export."
     ),
     "context": "Ownquesta is a no-code AutoML app with a public home page, authentication flow, /home onboarding screen, dashboard, AutoML Playground, model testing, and export/download actions.",
+  },
+  {
+    "keywords": {"ml tutorial", "machine learning tutorial", "what do i learn in the ml tutorial", "tutorial content"},
+    "answer": (
+      "The ML Tutorial page teaches the complete workflow used inside Ownquesta:\n"
+      "1. Problem framing and dataset readiness checks.\n"
+      "2. Data cleaning and preprocessing basics.\n"
+      "3. Feature engineering and target selection.\n"
+      "4. EDA interpretation (patterns, distributions, outliers).\n"
+      "5. Model selection logic in AutoML Playground.\n"
+      "6. Training, validation, and accuracy evaluation.\n"
+      "7. Prediction testing and result interpretation.\n"
+      "8. Exporting model artifacts and Python scripts.\n\n"
+      "Open the full guided experience from /ml-tutorial to follow each step interactively."
+    ),
+    "context": "The ML Tutorial is the guided learning path that maps directly to AutoML Playground actions from data prep through export.",
   },
   {
     "keywords": {"authenticated home", "welcome page", "go to dashboard", "after sign in"},
