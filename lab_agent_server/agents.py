@@ -672,6 +672,13 @@ Focus on:
   3. Top feature distributions or box-plots by target
   4. Missing-value summary (heatmap only if nulls exist, otherwise print the ✅ message)
 
+REPORTING RULES:
+  • Build a detailed report grounded in observed chart evidence.
+  • For every major finding, reference the chart type/source (target distribution, correlation heatmap, box-plot, etc.).
+  • Separate facts from recommendations.
+  • Include both ML impact (model quality/generalization) and business impact.
+  • Keep conclusions actionable and prioritized.
+
 Respond ONLY with valid JSON — no prose before or after.
 """
 
@@ -698,7 +705,13 @@ Return EXACTLY:
   ],
   "summary": "<2-4 sentence overview of what EDA should reveal>",
   "feature_importance_notes": "<which features seem most predictive and why>",
-  "preprocessing_recommendations": "<data cleaning / transformation advice based on EDA>"
+  "preprocessing_recommendations": "<data cleaning / transformation advice based on EDA>",
+  "executive_summary": "<concise, decision-ready summary with model and business impact>",
+  "data_quality_findings": ["<finding 1>", "<finding 2>"],
+  "key_patterns": ["<pattern backed by chart evidence>", "<pattern backed by chart evidence>"],
+  "risk_flags": ["<risk 1>", "<risk 2>"],
+  "recommendations": ["<prioritized action 1>", "<prioritized action 2>"],
+  "chart_narrative": "<how the charts together support the final conclusion>"
 }}
 """
 
@@ -876,7 +889,10 @@ class MLAgent:
         feature_analysis: str = "",
     ) -> dict:
         """Generate EDA code cells and a summary.
-        Returns: {cells: [{title, code}], summary, feature_importance_notes, preprocessing_recommendations}
+      Returns detailed report data including:
+      {cells, summary, feature_importance_notes, preprocessing_recommendations,
+       executive_summary, data_quality_findings, key_patterns, risk_flags,
+       recommendations, chart_narrative}
         """
         payload = json.dumps(
             {

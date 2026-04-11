@@ -435,6 +435,7 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
         # Step 3b – Exploratory Data Analysis (EDA)
         yield _sse({"type": "status", "text": "🔍 Running Exploratory Data Analysis…"})
         eda_summary_data = {}
+        eda_chart_insights: list[dict] = []
         try:
             eda_result = agent.run_eda(
                 filename=req.uploaded_filename,
@@ -472,12 +473,40 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
                     "charts": eda_charts,
                 })
 
+                # Add chart-level narrative so reports are evidence-driven.
+                if eda_charts:
+                    try:
+                        insight = agent.explain_chart(eda_code, {
+                            "filename": req.uploaded_filename,
+                            "problem_type": result.get("problem_type", "unknown"),
+                            "target_column": result.get("target_column") or req.target_column or "",
+                            "stage": "eda",
+                            "dataset_summary": result.get("dataset_summary", ""),
+                        })
+                        insight_obj = {
+                            "title": eda_title,
+                            "charts_count": len(eda_charts),
+                            "insight": insight,
+                        }
+                        eda_chart_insights.append(insight_obj)
+                        yield _sse({"type": "eda_insight", "data": insight_obj})
+                    except Exception:
+                        pass
+
             eda_summary_data = {
                 "summary": eda_result.get("summary", ""),
                 "feature_importance": eda_result.get("feature_importance_notes", ""),
                 "preprocessing": eda_result.get("preprocessing_recommendations", ""),
+                "executive_summary": eda_result.get("executive_summary", ""),
+                "data_quality_findings": eda_result.get("data_quality_findings", []),
+                "key_patterns": eda_result.get("key_patterns", []),
+                "risk_flags": eda_result.get("risk_flags", []),
+                "recommendations": eda_result.get("recommendations", []),
+                "chart_narrative": eda_result.get("chart_narrative", ""),
+                "chart_insights": eda_chart_insights,
             }
             yield _sse({"type": "eda_summary", "data": eda_summary_data})
+            yield _sse({"type": "report_summary", "data": eda_summary_data})
         except Exception as exc:
             logger.warning("EDA step failed (non-fatal): %s", exc)
             yield _sse({"type": "status", "text": "⚠️ EDA step skipped due to an error."})
@@ -501,6 +530,13 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
             "eda_summary":                   eda_summary_data.get("summary", ""),
             "feature_importance_notes":      eda_summary_data.get("feature_importance", ""),
             "preprocessing_recommendations": eda_summary_data.get("preprocessing", ""),
+            "report_executive_summary":      eda_summary_data.get("executive_summary", ""),
+            "report_data_quality_findings":  eda_summary_data.get("data_quality_findings", []),
+            "report_key_patterns":           eda_summary_data.get("key_patterns", []),
+            "report_risk_flags":             eda_summary_data.get("risk_flags", []),
+            "report_recommendations":        eda_summary_data.get("recommendations", []),
+            "report_chart_narrative":        eda_summary_data.get("chart_narrative", ""),
+            "report_chart_insights":         eda_summary_data.get("chart_insights", []),
             "selected_model":                None,
             "feature_columns":               [],
             "stage":                         "analyzed",
