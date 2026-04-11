@@ -283,7 +283,7 @@ Return EXACTLY:
 _CHAT_DECISION_SYS = """\
 You are an expert ML assistant embedded in a Jupyter notebook environment.
 When the user asks a question, decide whether to:
-  - "explain" : give a concise text answer (< 150 words, no code block needed)
+  - "explain" : give a concise but useful text answer (typically 120-260 words, no code block needed)
   - "execute"  : write Python code that should run in the notebook (plots, computations, new analyses)
 
 Rules:
@@ -294,6 +294,18 @@ Rules:
 • ALWAYS use print() to display results — never rely on bare variable names as the last line
 • Wrap numeric results, dataframes, and computation outputs in print()
 • If no useful printable output can be produced, use action="explain" instead
+
+MODEL-SELECTION REASONING RULES (critical):
+• If the user asks "why this model", "why these top 3", "which is best for my dataset", or any model-comparison question,
+  ALWAYS choose action="explain" and provide dataset-grounded reasoning.
+• Use current context fields (problem_type, feature_analysis, missing_values_note, models, eda summary/risk flags) to justify decisions.
+• Structure the explanation in this order:
+  1) Dataset signals that influenced choice (size, feature types, class balance, noise, missingness, cardinality)
+  2) Explainability trade-off (interpretability vs complexity for this dataset)
+  3) Performance expectation (why chosen model should generalize better than alternatives)
+  4) Risks and fallback strategy (when to prefer model #2 or #3)
+• Do not give generic textbook reasons; tie each point to known dataset context.
+• Mention at least one concrete reason for each of the top-3 models when asked about ranking.
 
 Respond ONLY with valid JSON:
 {{
@@ -797,9 +809,35 @@ class MLAgent:
             return resp.choices[0].message.content or ""
 
     def _ctx_str(self, context: dict) -> str:
+        models = context.get("models") or []
+        model_brief: list[dict[str, Any]] = []
+        if isinstance(models, list):
+            for m in models[:3]:
+                if isinstance(m, dict):
+                    model_brief.append({
+                        "rank": m.get("rank"),
+                        "name": m.get("name") or m.get("display_name"),
+                        "reasoning": (m.get("reasoning") or "")[:220],
+                        "expected_performance": (m.get("expected_performance") or "")[:120],
+                    })
+
+        compact = {
+            "filename": context.get("filename"),
+            "file_path": context.get("file_path"),
+            "problem_type": context.get("problem_type"),
+            "target_column": context.get("target_column"),
+            "stage": context.get("stage"),
+            "dataset_summary": context.get("dataset_summary"),
+            "feature_analysis": (context.get("feature_analysis") or "")[:1200],
+            "missing_values_note": (context.get("missing_values_note") or "")[:500],
+            "feature_engineering_reasoning": (context.get("feature_engineering_reasoning") or "")[:700],
+            "eda_summary": (context.get("eda_summary") or "")[:700],
+            "risk_flags": context.get("report_risk_flags") or context.get("risk_flags") or [],
+            "top_models": model_brief,
+            "selected_model": context.get("selected_model"),
+        }
         return json.dumps(
-            {k: context.get(k) for k in
-             ["filename", "file_path", "problem_type", "target_column", "stage", "dataset_summary"]},
+            compact,
             ensure_ascii=False,
         )
 
