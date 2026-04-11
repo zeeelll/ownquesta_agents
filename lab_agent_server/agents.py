@@ -1,5 +1,5 @@
 """
-agents.py – OpenAI-powered ML agents for Lab Playground
+agents.py - OpenAI-powered AutoML agents for OwnQuesta
 
 Roles:
   1. analyze()          – profile data, feature engineering, top 3 model suggestions
@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
+import time
 from typing import Any, Optional
 
 
@@ -60,6 +62,9 @@ When analysing a dataset you always:
   • Spot quality issues (nulls, skew, cardinality)
   • Propose feature-engineering steps and write clean Python code for them
   • Recommend the top 3 scikit-learn models with clear reasoning
+  • Detect leakage risks (target leakage, post-outcome columns, IDs)
+  • Check class imbalance and mention balancing strategy when needed
+  • Explain trade-offs between bias/variance and interpretability
 
 CRITICAL — always use these modern API patterns in feature_engineering_code:
   • OneHotEncoder: use sparse_output=False  (NOT sparse=False — removed in sklearn 1.2)
@@ -159,6 +164,8 @@ SPEED CONTRACTS — every model cell must finish in < 90 seconds:
   • DecisionTree                → max_depth=15
   • NEVER use GridSearchCV, RandomizedSearchCV — multiply training time unacceptably
   • Cross-validation: ONLY for datasets < 3000 rows, max cv=3 folds; otherwise skip it
+  • Hyperparameter tuning: use a tiny manual candidate set (max 3 configs) and choose best validation metric
+  • For datasets >= 5000 rows: skip tuning loop and use one fast default config
 
 Always use seaborn with dark theme for any visualisation:
   import seaborn as sns, matplotlib.pyplot as plt
@@ -209,6 +216,12 @@ PERFORMANCE RULES — training must complete within 90 seconds on any dataset si
   • Any other model: add the fastest equivalent hyperparameters to prevent runaway training
   • For datasets > 5000 rows: add n_jobs=-1 wherever supported
   • NEVER use GridSearchCV or RandomizedSearchCV — they multiply training time by n_iter × n_folds
+
+ACCURACY RULES — improve predictions without violating the 90-second budget:
+  • For classification: if class imbalance ratio > 1.8, use class_weight='balanced' where supported
+  • Add a lightweight validation split from training data (or cv<=3 on small data) to compare up to 3 parameter candidates
+  • Select the final model config using the relevant metric: F1/ROC-AUC for classification, RMSE/MAE for regression
+  • Print why the chosen config won and the top 2 alternatives
 
 MANDATORY — every pipeline cell that builds X MUST apply ALL steps below in order:
 
@@ -693,11 +706,14 @@ Return EXACTLY:
 # ── Agent class ───────────────────────────────────────────────────────────────
 
 class MLAgent:
-    """OpenAI / Anthropic chat completions wrapper for every lab-agent role."""
+    """OpenAI / Anthropic chat completions wrapper for every AutoML agent role."""
 
     def __init__(self, api_key: str, model: str = "gpt-4o-mini", provider: str = "openai"):
         self.model    = model
         self.provider = provider
+        self.cache_enabled = os.getenv("AUTOML_AGENT_CACHE", "1").strip() != "0"
+        self._cache_ttl_seconds = int(os.getenv("AUTOML_AGENT_CACHE_TTL", "900"))
+        self._cache: dict[str, tuple[float, dict]] = {}
         self.client: Any
         if provider == "anthropic":
             from anthropic import Anthropic
@@ -708,7 +724,34 @@ class MLAgent:
 
     # ── private helpers ───────────────────────────────────────────────────────
 
-    def _complete(self, system: str, user: str, max_tokens: int = 3000) -> str:
+    def _cache_key(self, scope: str, payload: str) -> str:
+        digest = hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+        return f"{scope}:{self.provider}:{self.model}:{digest}"
+
+    def _cache_get(self, key: str) -> Optional[dict]:
+        if not self.cache_enabled:
+            return None
+        item = self._cache.get(key)
+        if not item:
+            return None
+        ts, data = item
+        if (ts + self._cache_ttl_seconds) < time.time():
+            self._cache.pop(key, None)
+            return None
+        return data
+
+    def _cache_set(self, key: str, value: dict) -> None:
+        if not self.cache_enabled:
+            return
+        self._cache[key] = (time.time(), value)
+
+    def _complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 3000,
+        json_mode: bool = False,
+    ) -> str:
         if self.provider == "anthropic":
             resp = self.client.messages.create(
                 model=self.model,
@@ -718,15 +761,26 @@ class MLAgent:
             )
             return resp.content[0].text if resp.content else ""
         else:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
+            params: dict[str, Any] = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": system},
                     {"role": "user",   "content": user},
                 ],
-                max_tokens=max_tokens,
-                temperature=0.2,
-            )
+                "max_tokens": max_tokens,
+                "temperature": 0.15,
+            }
+            if json_mode:
+                params["response_format"] = {"type": "json_object"}
+            try:
+                resp = self.client.chat.completions.create(**params)
+            except Exception as exc:
+                # Some models/providers reject response_format=json_object.
+                if json_mode and "response_format" in str(exc).lower():
+                    params.pop("response_format", None)
+                    resp = self.client.chat.completions.create(**params)
+                else:
+                    raise
             return resp.choices[0].message.content or ""
 
     def _ctx_str(self, context: dict) -> str:
@@ -745,13 +799,29 @@ class MLAgent:
         target_column: Optional[str] = None,
     ) -> dict:
         """Analyse the dataset and suggest top 3 models."""
+        payload = json.dumps(
+            {
+                "filename": filename,
+                "target_column": target_column,
+                "profile": profile_output[:7000],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        ck = self._cache_key("analyze", payload)
+        cached = self._cache_get(ck)
+        if cached is not None:
+            return cached
+
         user = _ANALYSIS_USER.format(
             filename=filename,
             target=target_column or "not specified – please infer from the data",
             profile=profile_output[:7000],
         )
-        raw = self._complete(_ANALYSIS_SYS, user, max_tokens=2800)
-        return _extract_json(raw)
+        raw = self._complete(_ANALYSIS_SYS, user, max_tokens=2300, json_mode=True)
+        result = _extract_json(raw)
+        self._cache_set(ck, result)
+        return result
 
     # ── 2. Pipeline generation ────────────────────────────────────────────────
 
@@ -765,6 +835,23 @@ class MLAgent:
         fe_code: str,
     ) -> dict:
         """Generate a complete ML pipeline (cell-by-cell) for the chosen model."""
+        payload = json.dumps(
+            {
+                "filename": filename,
+                "problem_type": problem_type,
+                "target_column": target_column,
+                "model_name": model_name,
+                "profile": profile_output[:3500],
+                "fe_code": (fe_code or "")[:3500],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        ck = self._cache_key("build_pipeline", payload)
+        cached = self._cache_get(ck)
+        if cached is not None:
+            return cached
+
         user = _PIPELINE_USER.format(
             filename=filename,
             problem_type=problem_type,
@@ -773,8 +860,10 @@ class MLAgent:
             profile=profile_output[:3500],
             fe_code=fe_code or "# (no feature engineering applied)",
         )
-        raw = self._complete(_PIPELINE_SYS, user, max_tokens=3500)
-        return _extract_json(raw)
+        raw = self._complete(_PIPELINE_SYS, user, max_tokens=3000, json_mode=True)
+        result = _extract_json(raw)
+        self._cache_set(ck, result)
+        return result
 
     # ── 3. Exploratory Data Analysis ─────────────────────────────────────────
 
@@ -789,6 +878,22 @@ class MLAgent:
         """Generate EDA code cells and a summary.
         Returns: {cells: [{title, code}], summary, feature_importance_notes, preprocessing_recommendations}
         """
+        payload = json.dumps(
+            {
+                "filename": filename,
+                "problem_type": problem_type,
+                "target_column": target_column,
+                "profile": profile_output[:5000],
+                "feature_analysis": feature_analysis[:2000],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        ck = self._cache_key("run_eda", payload)
+        cached = self._cache_get(ck)
+        if cached is not None:
+            return cached
+
         user = _EDA_USER.format(
             filename=filename,
             problem_type=problem_type,
@@ -796,8 +901,10 @@ class MLAgent:
             profile=profile_output[:5000],
             feature_analysis=feature_analysis[:2000],
         )
-        raw = self._complete(_EDA_SYS, user, max_tokens=3000)
-        return _extract_json(raw)
+        raw = self._complete(_EDA_SYS, user, max_tokens=2200, json_mode=True)
+        result = _extract_json(raw)
+        self._cache_set(ck, result)
+        return result
 
     # ── 4. Chat with code-detection ───────────────────────────────────────────
 
@@ -830,19 +937,28 @@ class MLAgent:
             user_messages = [m for m in messages if m["role"] != "system"]
             resp = self.client.messages.create(
                 model=self.model,
-                max_tokens=900,
+                max_tokens=700,
                 system=sys_content,
                 messages=user_messages,
             )
             raw = resp.content[0].text if resp.content else ""
         else:
-            resp = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=900,
-                temperature=0.3,
-            )
-            raw = resp.choices[0].message.content or ""
+          params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": 700,
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+          }
+          try:
+            resp = self.client.chat.completions.create(**params)
+          except Exception as exc:
+            if "response_format" in str(exc).lower():
+              params.pop("response_format", None)
+              resp = self.client.chat.completions.create(**params)
+            else:
+              raise
+          raw = resp.choices[0].message.content or ""
         try:
             return _extract_json(raw)
         except ValueError:
@@ -886,7 +1002,7 @@ class MLAgent:
             "Write Python code that creates a prediction using the in-scope variable 'model'. "
             "Print the result clearly with labels."
         )
-        return self._complete(_PREDICT_CODE_SYS, user, max_tokens=500)
+        return self._complete(_PREDICT_CODE_SYS, user, max_tokens=450)
 
     # ── 7. Guard: error analysis & fix ────────────────────────────────────────
 
@@ -908,7 +1024,7 @@ class MLAgent:
             context=ctx,
             search_results=search_results[:2000] if search_results else "(none — LLM knowledge only)",
         )
-        raw = self._complete(_FIX_SYS, user, max_tokens=2500)
+        raw = self._complete(_FIX_SYS, user, max_tokens=1800, json_mode=True)
         try:
             return _extract_json(raw)
         except ValueError:
@@ -948,7 +1064,7 @@ class MLAgent:
             f"Current script:\n```python\n{script[:6000]}\n```\n\n"
             f"User request: {message}"
         )
-        raw = self._complete(sys_prompt, user_prompt)
+        raw = self._complete(sys_prompt, user_prompt, json_mode=True)
         try:
             result = _extract_json(raw)
         except Exception:
