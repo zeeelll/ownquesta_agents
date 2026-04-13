@@ -39,6 +39,7 @@ v2_sessions:  dict[str, dict]    = {}
 
 LAB_BACKEND     = "http://localhost:8010"
 MAX_FIX_ATTEMPTS = 7   # guard retry budget per failing cell
+MAX_AGENT_CALL_RETRIES = 3
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -181,6 +182,92 @@ for col in cat_cols[:6]:
 def _sse(event: dict) -> str:
     """Format a dict as a single SSE data line."""
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _fallback_models(problem_type: str) -> list[dict]:
+    if (problem_type or "").lower() == "regression":
+        return [{
+            "rank": 1,
+            "name": "RandomForestRegressor",
+            "display_name": "Random Forest Regressor",
+            "reasoning": "Reliable baseline when detailed model analysis fails.",
+            "pros": ["Handles non-linearity", "Works with mixed feature scales"],
+            "cons": ["May need tuning for best performance"],
+            "expected_performance": "Baseline quality regression output",
+        }]
+    return [{
+        "rank": 1,
+        "name": "RandomForestClassifier",
+        "display_name": "Random Forest Classifier",
+        "reasoning": "Reliable baseline when detailed model analysis fails.",
+        "pros": ["Robust to noisy features", "Strong baseline accuracy"],
+        "cons": ["Can be less interpretable"],
+        "expected_performance": "Baseline quality classification output",
+    }]
+
+
+def _fallback_analysis_result(target_column: str | None, problem_type: str = "classification") -> dict:
+    target = (target_column or "target").strip() or "target"
+    ptype = (problem_type or "classification").strip() or "classification"
+    return {
+        "problem_type": ptype,
+        "target_column": target,
+        "dataset_summary": "Fallback summary: dataset loaded, but AI analysis failed after retries.",
+        "feature_analysis": "Fallback feature analysis enabled to continue pipeline execution.",
+        "missing_values_note": "Use imputation and safe defaults during pipeline build.",
+        "feature_engineering_reasoning": "Proceeding with conservative preprocessing fallback.",
+        "feature_engineering_code": "print('Fallback: skipped advanced feature engineering due to upstream analysis issue.')",
+        "models": _fallback_models(ptype),
+    }
+
+
+def _fallback_pipeline_result(file_path: str, target_column: str, problem_type: str) -> dict:
+    target = (target_column or "target").replace("'", "")
+    is_reg = (problem_type or "").lower() == "regression"
+    model_cls = "RandomForestRegressor" if is_reg else "RandomForestClassifier"
+    metric_line = "print('R2:', r2_score(y_test, preds))" if is_reg else "print('Accuracy:', accuracy_score(y_test, preds))"
+
+    code = f"""\
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import {model_cls}
+from sklearn.metrics import accuracy_score, r2_score
+
+if 'df_processed' in globals():
+    _work_df = df_processed.copy()
+elif 'df' in globals():
+    _work_df = df.copy()
+else:
+    _work_df = pd.read_csv(r'{file_path}')
+
+if '{target}' not in _work_df.columns:
+    raise ValueError("Target column '{target}' not found in dataset")
+
+y = _work_df['{target}']
+X = _work_df.drop(columns=['{target}'])
+X = pd.get_dummies(X, drop_first=False)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+trained_columns = X_train.columns.tolist()
+feature_names = X.columns.tolist()
+
+model = {model_cls}(random_state=42)
+model.fit(X_train, y_train)
+preds = model.predict(X_test)
+{metric_line}
+print('Fallback pipeline executed. Features:', len(trained_columns))
+"""
+
+    return {
+        "reasoning": "Fallback pipeline generated after AI pipeline generation failed.",
+        "feature_columns": [],
+        "cells": [{
+            "title": "Fallback Baseline Pipeline",
+            "description": "Loads data, trains a baseline model, and evaluates results.",
+            "code": code,
+            "has_chart": False,
+        }],
+    }
 
 
 def _guard_fix(
@@ -391,11 +478,18 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
 
         # Step 2 – AI analysis
         yield _sse({"type": "status", "text": "🤔 AI is analysing your data…"})
-        try:
-            result = agent.analyze(req.uploaded_filename, profile_output, req.target_column)
-        except Exception as exc:
-            yield _sse({"type": "error", "text": f"AI analysis failed: {exc}"})
-            yield _sse({"type": "done"}); return
+        result = None
+        last_analysis_error = None
+        for _ in range(MAX_AGENT_CALL_RETRIES):
+            try:
+                result = agent.analyze(req.uploaded_filename, profile_output, req.target_column)
+                break
+            except Exception as exc:
+                last_analysis_error = exc
+
+        if result is None:
+            yield _sse({"type": "status", "text": f"⚠️ AI analysis failed after retries. Switching to fallback analysis: {last_analysis_error}"})
+            result = _fallback_analysis_result(req.target_column)
 
         yield _sse({"type": "analysis", "data": {
             "problem_type":                  result.get("problem_type"),
@@ -573,18 +667,29 @@ def v2_build_pipeline_stream(req: V2BuildPipelineRequest):
         target = req.target_column or state.get("target_column") or "label"
         yield _sse({"type": "status", "text": f"🧠 Planning pipeline with {req.selected_model}…"})
 
-        try:
-            result = agent.build_pipeline(
-                filename=state["filename"],
-                problem_type=state.get("problem_type") or "classification",
+        result = None
+        last_pipeline_error = None
+        for _ in range(MAX_AGENT_CALL_RETRIES):
+            try:
+                result = agent.build_pipeline(
+                    filename=state["filename"],
+                    problem_type=state.get("problem_type") or "classification",
+                    target_column=target,
+                    model_name=req.selected_model,
+                    profile_output=state.get("profile_output", ""),
+                    fe_code=state.get("feature_engineering_code", ""),
+                )
+                break
+            except Exception as exc:
+                last_pipeline_error = exc
+
+        if result is None:
+            yield _sse({"type": "status", "text": f"⚠️ Pipeline generation failed after retries. Running fallback pipeline: {last_pipeline_error}"})
+            result = _fallback_pipeline_result(
+                file_path=state.get("file_path", ""),
                 target_column=target,
-                model_name=req.selected_model,
-                profile_output=state.get("profile_output", ""),
-                fe_code=state.get("feature_engineering_code", ""),
+                problem_type=state.get("problem_type") or "classification",
             )
-        except Exception as exc:
-            yield _sse({"type": "error", "text": f"Pipeline generation failed: {exc}"})
-            yield _sse({"type": "done"}); return
 
         feature_columns = result.get("feature_columns", [])
 

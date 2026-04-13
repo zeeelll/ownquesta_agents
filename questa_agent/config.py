@@ -206,6 +206,7 @@ PRODUCT FACTS TO USE:
 - Analysis includes EDA insights and top model recommendations.
 - Users can test predictions after training.
 - Export buttons provide model download and Python script export.
+- For AutoML prediction reliability: always save feature_names.pkl with model.pkl after training, then auto-align prediction inputs (add missing features as 0 and reorder columns) before model.predict().
 
 STYLE:
 - Friendly, clear, and practical.
