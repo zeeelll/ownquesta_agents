@@ -12,9 +12,9 @@ load_dotenv()
 # ─────────────────────────────────────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.getenv("QUESTA_MODEL", "gpt-4o-mini")
-MAX_TOKENS: int = int(os.getenv("QUESTA_MAX_TOKENS", "800"))
-TEMPERATURE: float = float(os.getenv("QUESTA_TEMPERATURE", "0.7"))
-MAX_HISTORY: int = 10  # Number of past messages to keep in memory
+MAX_TOKENS: int = int(os.getenv("QUESTA_MAX_TOKENS", "650"))
+TEMPERATURE: float = float(os.getenv("QUESTA_TEMPERATURE", "0.35"))
+MAX_HISTORY: int = 8  # Number of past messages to keep in memory
 
 # ─────────────────────────────────────────────
 # AGENT IDENTITY
@@ -29,11 +29,15 @@ WELCOME_MESSAGE = (
 
 SUGGESTED_QUESTIONS = [
   "How does Ownquesta work from start to finish?",
+  "What is the full 10-step Ownquesta flow?",
+  "Which pages should I use first as a beginner?",
   "What do I learn in the ML Tutorial?",
+  "What is Dashboard vs ML Tutorial?",
   "What happens after I click Analyse?",
   "What is the AutoML Playground?",
   "What is Easy Mode vs Code Mode?",
   "How do I upload my dataset?",
+  "How does payment and export work?",
   "How do I test my model?",
   "Do I need coding knowledge?",
   "How long does training take?",
@@ -144,6 +148,47 @@ APP_KNOWLEDGE = [
     ),
     "context": "The results screen includes Download Model and Python Script actions for export.",
   },
+  {
+    "keywords": {"all pages", "which pages", "site map", "navigation", "where should i go"},
+    "answer": (
+      "Main pages by purpose:\n"
+      "1. Public: /, /about, /help, /tutorial.\n"
+      "2. Authentication: /login.\n"
+      "3. Authenticated workspace: /home, /dashboard, /ml-tutorial, /automl, /profile, /my-downloads, /my-deployments, /premium-upgrade.\n"
+      "If you are new: start at /tutorial, then /login, then /dashboard, then /automl."
+    ),
+    "context": "Ownquesta has public information pages, authentication flow, and authenticated workflow pages for building, testing, payment, downloads, and deployments.",
+  },
+  {
+    "keywords": {"dashboard vs tutorial", "difference between dashboard and tutorial", "dashboard and ml tutorial"},
+    "answer": (
+      "Dashboard (/dashboard) is the operations hub where you create/open projects and move into AutoML. "
+      "ML Tutorial (/ml-tutorial) is the guided learning hub that explains each step, button behavior, and transitions in the full workflow."
+    ),
+    "context": "Dashboard is execution/navigation for projects; tutorial is explanation/training for users.",
+  },
+  {
+    "keywords": {"payment", "checkout", "premium", "premium-upgrade", "locked export"},
+    "answer": (
+      "Payment is only required when an export/deployment action is locked. "
+      "The flow is: trigger locked action -> open checkout (/premium-upgrade) -> complete payment -> return to export/deploy action."
+    ),
+    "context": "Payment appears conditionally and is not part of the core analysis/training path.",
+  },
+  {
+    "keywords": {"my downloads", "download history", "my-downloads"},
+    "answer": (
+      "Use /my-downloads to verify and retrieve previously exported assets after training and export."
+    ),
+    "context": "My Downloads stores access to exported artifacts.",
+  },
+  {
+    "keywords": {"my deployments", "deployment page", "my-deployments"},
+    "answer": (
+      "Use /my-deployments to review deployment records and endpoints after deployment actions are completed."
+    ),
+    "context": "My Deployments is the deployment tracking and management page.",
+  },
 ]
 
 
@@ -151,23 +196,87 @@ def normalize_question(value: str) -> str:
   return " ".join("".join(char.lower() if char.isalnum() else " " for char in value).split())
 
 
+def _tokens(value: str) -> set[str]:
+  return {token for token in normalize_question(value).split() if len(token) > 2}
+
+
+_COMPILED_KNOWLEDGE = []
+for entry in APP_KNOWLEDGE:
+  normalized_keywords = [normalize_question(keyword) for keyword in entry["keywords"]]
+  keyword_tokens = set()
+  for keyword in normalized_keywords:
+    keyword_tokens.update(_tokens(keyword))
+  _COMPILED_KNOWLEDGE.append(
+    {
+      "entry": entry,
+      "normalized_keywords": normalized_keywords,
+      "keyword_tokens": keyword_tokens,
+    }
+  )
+
+
 def get_local_answer(message: str) -> str | None:
   normalized = normalize_question(message)
-  for entry in APP_KNOWLEDGE:
-    if any(keyword in normalized for keyword in entry["keywords"]):
-      return entry["answer"]
+  query_tokens = _tokens(message)
+
+  # Fast exact phrase match first.
+  for item in _COMPILED_KNOWLEDGE:
+    if any(keyword in normalized for keyword in item["normalized_keywords"]):
+      return item["entry"]["answer"]
+
+  # Fuzzy token overlap fallback for wording variations.
+  best_score = 0.0
+  best_answer = None
+  for item in _COMPILED_KNOWLEDGE:
+    if not item["keyword_tokens"] or not query_tokens:
+      continue
+    overlap = len(query_tokens.intersection(item["keyword_tokens"]))
+    if overlap < 2:
+      continue
+    score = overlap / max(4, len(query_tokens))
+    if score > best_score:
+      best_score = score
+      best_answer = item["entry"]["answer"]
+
+  if best_score >= 0.35:
+    return best_answer
+
+  # Generic step-by-step route helper.
+  if any(term in normalized for term in ["step by step", "full flow", "how it works", "start to finish", "journey"]):
+    return (
+      "Ownquesta step-by-step flow:\n"
+      "1. Open Home (/).\n"
+      "2. Sign in/register on /login.\n"
+      "3. Continue to authenticated Home (/home).\n"
+      "4. Open Dashboard (/dashboard) or ML Tutorial (/ml-tutorial).\n"
+      "5. Enter AutoML Playground (/automl) and choose Easy/Code mode.\n"
+      "6. Upload dataset and set target.\n"
+      "7. Click Analyse and review model recommendations.\n"
+      "8. Train and test predictions.\n"
+      "9. Complete payment only if export/deploy is locked.\n"
+      "10. Export model/script and verify in /my-downloads."
+    )
+
   return None
 
 
 def get_relevant_context(message: str) -> str:
   normalized = normalize_question(message)
+  query_tokens = _tokens(message)
   matches = []
 
-  for entry in APP_KNOWLEDGE:
-    if any(keyword in normalized for keyword in entry["keywords"]):
-      matches.append(entry["context"])
+  for item in _COMPILED_KNOWLEDGE:
+    if any(keyword in normalized for keyword in item["normalized_keywords"]):
+      matches.append(item["entry"]["context"])
+      continue
+
+    if query_tokens:
+      overlap = len(query_tokens.intersection(item["keyword_tokens"]))
+      if overlap >= 2:
+        matches.append(item["entry"]["context"])
 
   if matches:
+    # Keep context short for lower latency and better focus.
     return "\n".join(matches[:3])
 
   return (

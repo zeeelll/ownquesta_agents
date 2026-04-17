@@ -4,7 +4,7 @@
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, validator
-from typing import List, Literal
+from typing import List, Literal, Optional
 import openai
 import logging
 
@@ -48,6 +48,9 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User's current message")
     history: List[ChatMessage] = Field(default=[], description="Previous conversation messages")
+    context: Optional[str] = Field(default=None, max_length=6000, description="Optional page context from client")
+    source: Optional[str] = Field(default=None, max_length=80, description="Optional source label")
+    scope: Optional[str] = Field(default=None, max_length=120, description="Optional query scope")
 
     @validator("message")
     def message_not_empty(cls, v):
@@ -80,7 +83,7 @@ class HealthResponse(BaseModel):
 # ─────────────────────────────────────────────
 # HELPER — BUILD MESSAGES FOR OPENAI
 # ─────────────────────────────────────────────
-def build_messages(user_message: str, history: List[ChatMessage], context: str) -> List[dict]:
+def build_messages(user_message: str, history: List[ChatMessage], context: str, source: Optional[str] = None, scope: Optional[str] = None) -> List[dict]:
     """
     Constructs the full message list for OpenAI:
     System prompt + recent conversation history + current user message.
@@ -89,6 +92,14 @@ def build_messages(user_message: str, history: List[ChatMessage], context: str) 
 
     if context:
         messages.append({"role": "system", "content": f"Relevant Ownquesta context:\n{context}"})
+
+    if source or scope:
+        tags = []
+        if source:
+            tags.append(f"source={source}")
+        if scope:
+            tags.append(f"scope={scope}")
+        messages.append({"role": "system", "content": f"Request metadata: {'; '.join(tags)}"})
 
     # Keep only the last MAX_HISTORY messages for context window efficiency
     recent_history = history[-MAX_HISTORY:]
@@ -162,8 +173,16 @@ async def chat(request: ChatRequest):
         )
 
     try:
-        context = get_relevant_context(request.message)
-        messages = build_messages(request.message, request.history, context)
+        base_context = get_relevant_context(request.message)
+        external_context = (request.context or "").strip()
+
+        if external_context:
+            # Keep context compact for lower latency while preserving page-specific signal.
+            context = f"{base_context}\n\nClient page context:\n{external_context[:3000]}"
+        else:
+            context = base_context
+
+        messages = build_messages(request.message, request.history, context, request.source, request.scope)
 
         logger.info(f"[Questa] Sending request to OpenAI | model={OPENAI_MODEL} | history_length={len(request.history)}")
 
