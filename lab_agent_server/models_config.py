@@ -26,11 +26,37 @@ class ModelConfig(TypedDict):
 # ── Registry: add new models here ─────────────────────────────────────────────
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    "gpt-4o-mini": {
-        "display_name": "GPT-4o Mini",
-        "short_name":   "GPT-4o-mini",
+    # ── Anthropic ──────────────────────────────────────────────────────────────
+    "claude-sonnet-4-6": {
+        "display_name": "Claude Sonnet 4.6",
+        "short_name":   "Sonnet 4.6",
+        "provider":     "anthropic",
+        "model_name":   "claude-sonnet-4-6",
+        "api_key_env":  "ANTHROPIC_API_KEY",
+        "free_quota":   None,           # unlimited
+    },
+    "claude-opus-4-6": {
+        "display_name": "Claude Opus 4.6",
+        "short_name":   "Opus 4.6",
+        "provider":     "anthropic",
+        "model_name":   "claude-opus-4-6",
+        "api_key_env":  "ANTHROPIC_API_KEY",
+        "free_quota":   1,
+    },
+    # ── OpenAI ─────────────────────────────────────────────────────────────────
+    "codex-5-2": {
+        "display_name": "Codex 5.2",
+        "short_name":   "Codex 5.2",
         "provider":     "openai",
-        "model_name":   "gpt-4o-mini",
+        "model_name":   "codex-5-2",
+        "api_key_env":  "OPENAI_API_KEY",
+        "free_quota":   1,
+    },
+    "gpt-5-3": {
+        "display_name": "GPT 5.3",
+        "short_name":   "GPT 5.3",
+        "provider":     "openai",
+        "model_name":   "gpt-5-3",
         "api_key_env":  "OPENAI_API_KEY",
         "free_quota":   None,           # unlimited
     },
@@ -42,37 +68,13 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         "api_key_env":  "OPENAI_API_KEY",
         "free_quota":   None,           # unlimited
     },
-    "gpt-5": {
-        "display_name": "GPT-5",
-        "short_name":   "GPT-5",
+    "gpt-4o-mini": {
+        "display_name": "GPT-4o Mini",
+        "short_name":   "GPT-4o Mini",
         "provider":     "openai",
-        "model_name":   "gpt-5",
+        "model_name":   "gpt-4o-mini",
         "api_key_env":  "OPENAI_API_KEY",
         "free_quota":   None,           # unlimited
-    },
-    "claude-opus-4-6": {
-        "display_name": "Claude Opus 4.6",
-        "short_name":   "Opus 4.6",
-        "provider":     "anthropic",
-        "model_name":   "claude-opus-4-6",
-        "api_key_env":  "ANTHROPIC_API_KEY",
-        "free_quota":   1,
-    },
-    "claude-sonnet-4-6": {
-        "display_name": "Claude Sonnet 4.6",
-        "short_name":   "Sonnet 4.6",
-        "provider":     "anthropic",
-        "model_name":   "claude-sonnet-4-6",
-        "api_key_env":  "ANTHROPIC_API_KEY",
-        "free_quota":   1,
-    },
-    "claude-sonnet-4-5": {
-        "display_name": "Claude Sonnet 4.5",
-        "short_name":   "Sonnet 4.5",
-        "provider":     "anthropic",
-        "model_name":   "claude-sonnet-4-5-20251001",
-        "api_key_env":  "ANTHROPIC_API_KEY",
-        "free_quota":   1,
     },
     "claude-haiku-4-5": {
         "display_name": "Claude Haiku 4.5",
@@ -82,17 +84,9 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         "api_key_env":  "ANTHROPIC_API_KEY",
         "free_quota":   3,
     },
-    "gpt-5-codex": {
-        "display_name": "GPT-5 Codex",
-        "short_name":   "Codex",
-        "provider":     "openai",
-        "model_name":   "gpt-5-codex",
-        "api_key_env":  "OPENAI_CODEX_API_KEY",
-        "free_quota":   1,              # 1 free session
-    },
 }
 
-DEFAULT_MODEL_ID = "gpt-4o-mini"
+DEFAULT_MODEL_ID = "claude-sonnet-4-6"
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────

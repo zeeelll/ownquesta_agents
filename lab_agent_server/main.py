@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import threading
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,6 +37,41 @@ app.add_middleware(
 # ── In-memory stores ──────────────────────────────────────────────────────────
 agent_states: dict[str, MLState] = {}
 v2_sessions:  dict[str, dict]    = {}
+
+_V2_SESSION_STORE_PATH = Path(tempfile.gettempdir()) / "ownquesta_lab_agent_v2_sessions.json"
+_v2_session_lock = threading.Lock()
+
+
+def _load_v2_sessions_from_disk() -> dict[str, dict]:
+    if not _V2_SESSION_STORE_PATH.exists():
+        return {}
+    try:
+        with _V2_SESSION_STORE_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_v2_sessions_to_disk() -> None:
+    with _v2_session_lock:
+        try:
+            with _V2_SESSION_STORE_PATH.open("w", encoding="utf-8") as f:
+                json.dump(v2_sessions, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+
+def _get_v2_session(session_id: str) -> dict | None:
+    state = v2_sessions.get(session_id)
+    if state is not None:
+        return state
+
+    stored = _load_v2_sessions_from_disk().get(session_id)
+    if stored:
+        v2_sessions[session_id] = stored
+        return stored
+    return None
 
 LAB_BACKEND     = "http://localhost:8010"
 MAX_FIX_ATTEMPTS = 7   # guard retry budget per failing cell
@@ -411,6 +447,7 @@ def run_step(req: RunStepRequest):
 def delete_agent_session(session_id: str):
     agent_states.pop(session_id, None)
     v2_sessions.pop(session_id, None)
+    _save_v2_sessions_to_disk()
     return {"ok": True}
 
 @app.get("/agent-state/{session_id}")
@@ -636,6 +673,7 @@ def v2_analyze_stream(req: V2AnalyzeRequest):
             "stage":                         "analyzed",
             "chat_history":                  [],
         }
+        _save_v2_sessions_to_disk()
         yield _sse({"type": "done"})
 
     return StreamingResponse(
@@ -654,7 +692,7 @@ def v2_build_pipeline_stream(req: V2BuildPipelineRequest):
       status → reasoning → (status → [guard] → code_cell [→ insight]) × N → done
     """
     def generate():
-        state = v2_sessions.get(req.session_id)
+        state = _get_v2_session(req.session_id)
         if not state:
             yield _sse({"type": "error", "text": "No analysis session found. Run Analyse first."})
             yield _sse({"type": "done"}); return
@@ -730,6 +768,8 @@ def v2_build_pipeline_stream(req: V2BuildPipelineRequest):
         state["selected_model"]  = req.selected_model
         state["feature_columns"] = feature_columns
         state["stage"]           = "pipeline_built"
+        v2_sessions[req.session_id] = state
+        _save_v2_sessions_to_disk()
 
         yield _sse({
             "type": "done",
@@ -753,7 +793,7 @@ def v2_chat(req: V2ChatRequest):
     If code is needed, execute it (with guard auto-fix on failure) and return
     the code + output alongside the reply.
     """
-    state   = v2_sessions.get(req.session_id, {})
+    state   = _get_v2_session(req.session_id) or {}
     history = state.get("chat_history", [])
 
     try:
@@ -829,6 +869,7 @@ def v2_chat(req: V2ChatRequest):
     ]
     if req.session_id in v2_sessions:
         v2_sessions[req.session_id]["chat_history"] = history[-20:]
+        _save_v2_sessions_to_disk()
 
     return {
         "action":        result.get("action", "explain"),
@@ -851,7 +892,7 @@ def v2_predict(req: V2PredictRequest):
     """
     Generate and execute prediction code using the trained model.
     """
-    state = v2_sessions.get(req.session_id)
+    state = _get_v2_session(req.session_id)
     if not state:
         raise HTTPException(404, "No pipeline session found.")
     if state.get("stage") != "pipeline_built":
@@ -888,7 +929,7 @@ def v2_models():
 
 @app.get("/v2/context/{session_id}")
 def v2_context(session_id: str):
-    state = v2_sessions.get(session_id)
+    state = _get_v2_session(session_id)
     if not state:
         raise HTTPException(404, "No v2 session found")
     return {k: v for k, v in state.items() if k != "chat_history"}
@@ -903,7 +944,7 @@ class V2GenerateScriptRequest(BaseModel):
 @app.post("/v2/generate-script")
 def v2_generate_script(req: V2GenerateScriptRequest):
     """Combine notebook cells into a single standalone .py script."""
-    state    = v2_sessions.get(req.session_id, {})
+    state    = _get_v2_session(req.session_id) or {}
     filename = state.get("filename", "dataset.csv")
 
     header = (
