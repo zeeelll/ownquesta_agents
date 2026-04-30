@@ -1,1 +1,16 @@
 .env
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Optional: ignore virtual environments
+.venv/
+venv/
+env/
+
+# Optional: OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
