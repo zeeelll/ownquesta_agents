@@ -869,7 +869,7 @@ class MLAgent:
             target=target_column or "not specified – please infer from the data",
             profile=profile_output[:7000],
         )
-        raw = self._complete(_ANALYSIS_SYS, user, max_tokens=2300, json_mode=True)
+        raw = self._complete(_ANALYSIS_SYS, user, max_tokens=3000, json_mode=True)
         result = _extract_json(raw)
         self._cache_set(ck, result)
         return result
@@ -911,7 +911,7 @@ class MLAgent:
             profile=profile_output[:3500],
             fe_code=fe_code or "# (no feature engineering applied)",
         )
-        raw = self._complete(_PIPELINE_SYS, user, max_tokens=3000, json_mode=True)
+        raw = self._complete(_PIPELINE_SYS, user, max_tokens=4096, json_mode=True)
         result = _extract_json(raw)
         self._cache_set(ck, result)
         return result
@@ -1078,7 +1078,7 @@ class MLAgent:
             context=ctx,
             search_results=search_results[:2000] if search_results else "(none — LLM knowledge only)",
         )
-        raw = self._complete(_FIX_SYS, user, max_tokens=1800, json_mode=True)
+        raw = self._complete(_FIX_SYS, user, max_tokens=2500, json_mode=True)
         try:
             return _extract_json(raw)
         except ValueError:

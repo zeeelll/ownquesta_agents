@@ -75,7 +75,7 @@ def _get_v2_session(session_id: str) -> dict | None:
 
 LAB_BACKEND     = "http://localhost:8010"
 MAX_FIX_ATTEMPTS = 7   # guard retry budget per failing cell
-MAX_AGENT_CALL_RETRIES = 3
+MAX_AGENT_CALL_RETRIES = 5
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
